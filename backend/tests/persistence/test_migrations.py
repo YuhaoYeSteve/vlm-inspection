@@ -16,4 +16,13 @@ def test_upgrade_creates_initial_schema(tmp_path) -> None:
     command.upgrade(config, "head")
 
     tables = set(inspect(create_engine(f"sqlite:///{database_path}")).get_table_names())
-    assert {"app_settings", "prompt_templates", "prompt_template_versions"} <= tables
+    assert {
+        "app_settings",
+        "inference_attempts",
+        "inference_results",
+        "prompt_templates",
+        "prompt_template_versions",
+        "report_exports",
+        "task_images",
+        "tasks",
+    } <= tables
