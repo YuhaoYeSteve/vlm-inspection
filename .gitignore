@@ -1,5 +1,6 @@
 .DS_Store
 .superpowers/
+.worktrees/
 .env
 .env.*
 !.env.example
@@ -18,4 +19,3 @@ dist/
 coverage/
 playwright-report/
 test-results/
-
