@@ -11,7 +11,10 @@ from app.api.templates import seed_templates_if_empty
 from app.core.config import Settings
 from app.core.db import make_engine, make_session_factory
 from app.core.secrets import KeyringSecretStore, SecretStoreProtocol
-from app.services.ark import InspectionServiceProtocol
+from app.repositories import TaskRepository
+from app.services.ark import InspectionServiceProtocol, KeychainArkInspectionService
+from app.services.events import TaskEventBroker
+from app.services.runner import TaskRunner
 
 
 def create_app(
@@ -24,18 +27,32 @@ def create_app(
     if engine is None:
         resolved_settings.ensure_directories()
     resolved_engine = engine or make_engine(resolved_settings.database_path)
+    sessions = make_session_factory(resolved_engine)
+    resolved_secret_store = secret_store or KeyringSecretStore()
+    resolved_inspection_service = inspection_service or KeychainArkInspectionService(
+        resolved_secret_store
+    )
+    events = TaskEventBroker()
+    runner = TaskRunner(sessions, resolved_inspection_service, events=events)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         with app.state.sessions() as session:
             seed_templates_if_empty(session)
-        yield
+            TaskRepository(session).recover_interrupted_work()
+            session.commit()
+        try:
+            yield
+        finally:
+            await app.state.runner.shutdown()
 
     app = FastAPI(title="Seed VLM Inspector", version="0.1.0", lifespan=lifespan)
     app.state.settings = resolved_settings
-    app.state.sessions = make_session_factory(resolved_engine)
-    app.state.secret_store = secret_store or KeyringSecretStore()
+    app.state.sessions = sessions
+    app.state.secret_store = resolved_secret_store
     app.state.inspection_service = inspection_service
+    app.state.event_broker = events
+    app.state.runner = runner
 
     @app.exception_handler(ApiError)
     async def handle_api_error(_request: Request, exc: ApiError) -> JSONResponse:

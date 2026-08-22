@@ -8,6 +8,7 @@ from typing import Any, Literal, Protocol
 from pydantic import ValidationError
 from volcenginesdkarkruntime import Ark  # type: ignore[import-untyped]
 
+from app.core.secrets import SecretStoreProtocol
 from app.domain.results import InspectionResult
 
 
@@ -46,6 +47,31 @@ class InspectionServiceProtocol(Protocol):
         user_prompt: str,
         image_path: Path,
     ) -> InspectionResult: ...
+
+
+class KeychainArkInspectionService:
+    def __init__(self, secrets: SecretStoreProtocol) -> None:
+        self.secrets = secrets
+
+    def inspect(
+        self,
+        config: ArkRuntimeConfig,
+        system_prompt: str,
+        user_prompt: str,
+        image_path: Path,
+    ) -> InspectionResult:
+        try:
+            api_key = self.secrets.get("ark_api_key")
+        except RuntimeError as exc:
+            raise ArkRequestError(code="keychain_unavailable") from exc
+        if api_key is None:
+            raise ArkRequestError(status_code=401, code="ark_api_key_missing")
+        return ArkInspectionService(api_key=api_key).inspect(
+            config,
+            system_prompt,
+            user_prompt,
+            image_path,
+        )
 
 
 class ArkInspectionService:
