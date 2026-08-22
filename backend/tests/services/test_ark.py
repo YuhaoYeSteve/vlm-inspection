@@ -86,6 +86,26 @@ def test_responses_adapter_sends_one_image_and_parses_schema(tmp_path) -> None:
     assert responses.calls[0]["text"]["format"]["type"] == "json_schema"
 
 
+def test_responses_adapter_reads_nested_output_when_sdk_helper_is_missing(tmp_path) -> None:
+    image = tmp_path / "image.jpg"
+    image.write_bytes(b"jpeg-bytes")
+    response = SimpleNamespace(
+        output_text=None,
+        output=[
+            SimpleNamespace(
+                type="message",
+                content=[SimpleNamespace(type="output_text", text=json.dumps(VALID))],
+            )
+        ],
+    )
+    responses = SimpleNamespace(create=lambda **_kwargs: response)
+    service = ArkInspectionService(client=SimpleNamespace(responses=responses))
+
+    result = service.inspect_responses(runtime(), "system", "user", image)
+
+    assert result.verdict is Verdict.PASS
+
+
 def test_chat_adapter_sends_one_image(tmp_path) -> None:
     image = tmp_path / "image.jpg"
     image.write_bytes(b"jpeg-bytes")

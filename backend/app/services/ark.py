@@ -213,9 +213,20 @@ class ArkInspectionService:
     @staticmethod
     def _responses_text(response: Any) -> str:
         text = getattr(response, "output_text", None)
-        if not isinstance(text, str) or not text.strip():
-            raise MalformedInspectionResult("Ark Responses output did not contain text")
-        return text
+        if isinstance(text, str) and text.strip():
+            return text
+
+        chunks: list[str] = []
+        for item in getattr(response, "output", None) or []:
+            content = item.get("content") if isinstance(item, Mapping) else getattr(item, "content", None)
+            for part in content or []:
+                part_type = part.get("type") if isinstance(part, Mapping) else getattr(part, "type", None)
+                part_text = part.get("text") if isinstance(part, Mapping) else getattr(part, "text", None)
+                if part_type == "output_text" and isinstance(part_text, str) and part_text.strip():
+                    chunks.append(part_text)
+        if chunks:
+            return "\n".join(chunks)
+        raise MalformedInspectionResult("Ark Responses output did not contain text")
 
     @staticmethod
     def _chat_text(response: Any) -> str:
