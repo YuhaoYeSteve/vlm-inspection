@@ -1,4 +1,5 @@
-from typing import Literal
+from datetime import datetime
+from typing import Any, Literal
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, SecretStr
 
@@ -40,3 +41,46 @@ class FeishuSettingsRead(BaseModel):
     folder_token: str
     callback_url: str
     app_secret_configured: bool
+
+
+class TemplateRule(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    rule_id: str = Field(pattern=r"^[a-z][a-z0-9_]{1,63}$")
+    name: str = Field(min_length=1, max_length=100)
+    text: str = Field(min_length=1, max_length=2000)
+
+
+class TemplateModelParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    temperature: float = Field(default=0.1, ge=0, le=2)
+    max_output_tokens: int = Field(default=4096, ge=256, le=32768)
+
+
+class TemplateWrite(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=200)
+    description: str = Field(default="", max_length=2000)
+    task_prompt: str = Field(default="", max_length=10000)
+    rules: list[TemplateRule] = Field(min_length=1, max_length=100)
+    model_params: TemplateModelParams = Field(default_factory=TemplateModelParams)
+
+
+class TemplateSummary(BaseModel):
+    id: str
+    slug: str
+    name: str
+    description: str
+    enabled: bool
+    version: int
+    created_at: datetime
+
+
+class TemplateDetail(TemplateSummary):
+    version_id: str
+    system_prompt: str
+    task_prompt: str
+    rules: list[TemplateRule]
+    model_params: dict[str, Any]

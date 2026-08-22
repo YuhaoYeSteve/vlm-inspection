@@ -33,7 +33,7 @@ dev = [
 packages = ["app"]
 
 [tool.pytest.ini_options]
-addopts = "-q"
+addopts = "-q --import-mode=importlib"
 asyncio_mode = "auto"
 testpaths = ["tests"]
 

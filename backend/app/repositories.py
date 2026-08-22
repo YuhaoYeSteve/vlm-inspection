@@ -77,6 +77,38 @@ class TemplateRepository:
             raise LookupError(version_id)
         return version
 
+    def get(self, template_id: str) -> PromptTemplate:
+        template = self.session.get(PromptTemplate, template_id)
+        if template is None:
+            raise LookupError(template_id)
+        return template
+
+    def get_by_name(self, name: str) -> PromptTemplate | None:
+        return self.session.scalar(select(PromptTemplate).where(PromptTemplate.name == name))
+
+    def count(self) -> int:
+        return int(self.session.scalar(select(func.count()).select_from(PromptTemplate)) or 0)
+
+    def list_templates(self) -> list[PromptTemplate]:
+        return list(self.session.scalars(select(PromptTemplate).order_by(PromptTemplate.created_at)))
+
+    def get_current_version(self, template_id: str) -> PromptTemplateVersion:
+        template = self.get(template_id)
+        if template.current_version_id is None:
+            raise LookupError(f"template {template_id} has no current version")
+        return self.get_version(template.current_version_id)
+
+    def get_version_number(self, template_id: str, version: int) -> PromptTemplateVersion:
+        record = self.session.scalar(
+            select(PromptTemplateVersion).where(
+                PromptTemplateVersion.template_id == template_id,
+                PromptTemplateVersion.version == version,
+            )
+        )
+        if record is None:
+            raise LookupError(f"{template_id}:v{version}")
+        return record
+
 
 class TaskRepository:
     def __init__(self, session: Session) -> None:
