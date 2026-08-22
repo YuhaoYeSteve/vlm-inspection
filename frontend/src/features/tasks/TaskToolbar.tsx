@@ -151,6 +151,15 @@ export function TaskToolbar({
       )}
       {uploadError && <p className="notice error-notice" role="alert">{uploadError}</p>}
       {actionMessage && <p className="notice success-notice" role="status">{actionMessage}</p>}
+      {task.report_status === "succeeded" && (
+        <p className="notice success-notice" role="status">飞书报告已生成</p>
+      )}
+      {(task.report_status === "pending" || task.report_status === "running") && (
+        <p className="notice report-progress-notice" role="status">正在生成飞书报告</p>
+      )}
+      {task.report_status === "failed" && (
+        <p className="notice error-notice" role="alert">飞书报告生成失败，可以重新提交。</p>
+      )}
     </>
   );
 }

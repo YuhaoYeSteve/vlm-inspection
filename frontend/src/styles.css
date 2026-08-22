@@ -987,6 +987,11 @@ textarea:focus-visible {
   font-size: 12px;
 }
 
+.report-progress-notice {
+  color: var(--warning);
+  background: var(--warning-soft);
+}
+
 .task-workspace {
   display: grid;
   grid-template-columns: minmax(480px, 1.05fr) minmax(380px, 0.95fr);
