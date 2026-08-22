@@ -1,6 +1,7 @@
 import { Navigate, createBrowserRouter } from "react-router-dom";
 
 import { SettingsPage } from "../features/settings/SettingsPage";
+import { TemplatesPage } from "../features/templates/TemplatesPage";
 import { App } from "./App";
 
 function Placeholder({ title, description }: { title: string; description: string }) {
@@ -31,7 +32,7 @@ export const router = createBrowserRouter([
       },
       {
         path: "templates",
-        element: <Placeholder title="提示词模板" description="编辑规则并保留每次变更的版本。" />,
+        element: <TemplatesPage />,
       },
       {
         path: "history",

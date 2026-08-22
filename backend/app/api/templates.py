@@ -1,15 +1,20 @@
+import asyncio
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, File, UploadFile, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.errors import ApiError
-from app.dependencies import get_session
+from app.dependencies import ArkDependencies, get_ark_dependencies, get_session
+from app.domain.results import InspectionResult
 from app.models import PromptTemplate, PromptTemplateVersion
 from app.repositories import TemplateRepository
 from app.schemas import TemplateDetail, TemplateRule, TemplateSummary, TemplateWrite
-from app.services.prompts import SYSTEM_EVIDENCE_POLICY, starter_templates
+from app.services.images import ImageIngestor, UnsupportedImage
+from app.services.prompts import SYSTEM_EVIDENCE_POLICY, build_prompt, starter_templates
 
 router = APIRouter(prefix="/api/templates", tags=["templates"])
 
@@ -145,6 +150,45 @@ def update_template(
         session.rollback()
         raise ApiError(409, "template_name_exists", "模板名称已存在。") from exc
     return _detail(template, version)
+
+
+@router.post("/{template_id}/test", response_model=InspectionResult)
+async def test_template(
+    template_id: str,
+    file: Annotated[UploadFile, File()],
+    session: Annotated[Session, Depends(get_session)],
+    ark: Annotated[ArkDependencies, Depends(get_ark_dependencies)],
+) -> InspectionResult:
+    repo = TemplateRepository(session)
+    try:
+        version = repo.get_current_version(template_id)
+    except LookupError as exc:
+        raise _not_found(template_id) from exc
+    content = await file.read(ImageIngestor.MAX_BYTES + 1)
+    try:
+        with TemporaryDirectory() as directory:
+            image = ImageIngestor(Path(directory)).ingest(
+                "test",
+                file.filename or "image",
+                content,
+            )
+            prompt = build_prompt(
+                {
+                    "system_prompt": version.system_prompt,
+                    "task_prompt": version.task_prompt,
+                    "rules": version.rules_json,
+                },
+                image.original_path.name,
+            )
+            return await asyncio.to_thread(
+                ark.inspector.inspect,
+                ark.runtime_config,
+                prompt.system,
+                prompt.user,
+                image.inference_path,
+            )
+    except UnsupportedImage as exc:
+        raise ApiError(422, "unsupported_image", str(exc)) from exc
 
 
 def seed_templates_if_empty(session: Session) -> None:

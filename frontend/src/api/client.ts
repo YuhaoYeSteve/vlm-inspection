@@ -7,6 +7,7 @@ import type {
   TemplateDetail,
   TemplateModelParams,
   TemplateRule,
+  TemplateSummary,
   UploadSummary,
 } from "./types";
 
@@ -77,7 +78,7 @@ export class ApiClient {
   disconnectFeishu = () =>
     this.request<void>("/api/auth/feishu/disconnect", { method: "DELETE" });
 
-  listTemplates = () => this.request<TemplateDetail[]>("/api/templates");
+  listTemplates = () => this.request<TemplateSummary[]>("/api/templates");
   getTemplate = (id: string) => this.request<TemplateDetail>(`/api/templates/${id}`);
   updateTemplate = (
     id: string,
