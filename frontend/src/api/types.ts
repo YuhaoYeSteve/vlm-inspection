@@ -71,7 +71,6 @@ export interface Finding {
   status: FindingStatus;
   observation: string;
   visual_evidence: string;
-  confidence: number;
 }
 
 export interface InspectionResult {
@@ -80,7 +79,6 @@ export interface InspectionResult {
   unverifiable_reason: string | null;
   verdict: Verdict;
   summary: string;
-  overall_confidence: number;
   findings: Finding[];
 }
 

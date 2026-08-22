@@ -29,7 +29,6 @@ export function ResultPanel({ result }: { result: InspectionResult }) {
           <span>{verdictLabels[result.verdict]}</span>
           <strong>{result.summary}</strong>
         </div>
-        <output>{Math.round(result.overall_confidence * 100)}%</output>
       </div>
       {result.unverifiable_reason && (
         <p className="unverifiable-reason">{result.unverifiable_reason}</p>
@@ -49,10 +48,6 @@ export function ResultPanel({ result }: { result: InspectionResult }) {
               <div>
                 <dt>视觉证据</dt>
                 <dd>{finding.visual_evidence}</dd>
-              </div>
-              <div>
-                <dt>置信度</dt>
-                <dd>{Math.round(finding.confidence * 100)}%</dd>
               </div>
             </dl>
           </article>

@@ -76,7 +76,6 @@ class FakeInspectionService:
             image_valid=True,
             verdict=Verdict.PASS,
             summary="test image is readable",
-            overall_confidence=1,
             findings=[
                 Finding(
                     rule_id="readable",
@@ -84,7 +83,6 @@ class FakeInspectionService:
                     status=FindingStatus.PASS,
                     observation="image decoded",
                     visual_evidence=image_path.name,
-                    confidence=1,
                 )
             ],
         )

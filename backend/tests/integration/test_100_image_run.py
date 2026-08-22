@@ -49,7 +49,6 @@ class MarkerInspector:
             image_valid=True,
             verdict=Verdict.PASS,
             summary=marker,
-            overall_confidence=1,
             findings=[
                 Finding(
                     rule_id="binding",
@@ -57,7 +56,6 @@ class MarkerInspector:
                     status=FindingStatus.PASS,
                     observation=marker,
                     visual_evidence=marker,
-                    confidence=1,
                 )
             ],
         )

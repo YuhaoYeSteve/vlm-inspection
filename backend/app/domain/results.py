@@ -1,5 +1,6 @@
+from collections.abc import Mapping
 from enum import StrEnum
-from typing import Self
+from typing import Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -24,7 +25,6 @@ class Finding(BaseModel):
     status: FindingStatus
     observation: str = Field(min_length=1)
     visual_evidence: str = Field(min_length=1)
-    confidence: float = Field(ge=0, le=1)
 
 
 class InspectionResult(BaseModel):
@@ -35,8 +35,28 @@ class InspectionResult(BaseModel):
     unverifiable_reason: str | None = None
     verdict: Verdict
     summary: str = Field(min_length=1)
-    overall_confidence: float = Field(ge=0, le=1)
     findings: list[Finding]
+
+    @model_validator(mode="before")
+    @classmethod
+    def discard_legacy_confidence(cls, value: Any) -> Any:
+        if not isinstance(value, Mapping):
+            return value
+        cleaned = dict(value)
+        cleaned.pop("overall_confidence", None)
+        findings = cleaned.get("findings")
+        if isinstance(findings, list):
+            cleaned["findings"] = [
+                {
+                    key: item_value
+                    for key, item_value in finding.items()
+                    if key != "confidence"
+                }
+                if isinstance(finding, Mapping)
+                else finding
+                for finding in findings
+            ]
+        return cleaned
 
     @model_validator(mode="after")
     def validate_visibility(self) -> Self:

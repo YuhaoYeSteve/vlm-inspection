@@ -747,7 +747,7 @@ textarea:focus-visible {
 
 .result-summary {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto 1fr;
   align-items: center;
   gap: 12px;
   padding: 16px;
@@ -767,11 +767,6 @@ textarea:focus-visible {
 
 .result-summary strong {
   font-size: 14px;
-}
-
-.result-summary output {
-  font-family: "SF Mono", "JetBrains Mono", monospace;
-  font-size: 13px;
 }
 
 .verdict-pass,

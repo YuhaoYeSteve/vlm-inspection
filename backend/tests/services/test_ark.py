@@ -11,7 +11,6 @@ VALID = {
     "unverifiable_reason": None,
     "verdict": "pass",
     "summary": "uniform is clean",
-    "overall_confidence": 0.9,
     "findings": [
         {
             "rule_id": "uniform",
@@ -19,7 +18,6 @@ VALID = {
             "status": "pass",
             "observation": "no visible stain",
             "visual_evidence": "the front of the shirt is visible",
-            "confidence": 0.9,
         }
     ],
 }

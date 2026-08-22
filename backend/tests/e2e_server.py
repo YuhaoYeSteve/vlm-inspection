@@ -37,7 +37,6 @@ class DeterministicInspectionService:
             image_valid=True,
             verdict=Verdict.PASS,
             summary=f"{image_path.name} 可见项目通过",
-            overall_confidence=0.98,
             findings=[
                 Finding(
                     rule_id="appearance",
@@ -45,7 +44,6 @@ class DeterministicInspectionService:
                     status=FindingStatus.PASS,
                     observation="可见区域无明显违规",
                     visual_evidence="人物上半身清晰可见",
-                    confidence=0.98,
                 )
             ],
         )

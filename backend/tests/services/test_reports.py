@@ -1,4 +1,5 @@
 import asyncio
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -21,6 +22,7 @@ class FakeFeishuClient:
         self.seen_operation_keys: set[str] = set()
         self.duplicate_operation_keys: list[str] = []
         self.calls: list[tuple[str, str]] = []
+        self.block_payloads: list[dict] = []
 
     def _operation(self, kind: str, key: str) -> None:
         self.operation_count += 1
@@ -49,7 +51,8 @@ class FakeFeishuClient:
         blocks: list[dict],
         operation_key: str,
     ) -> list[BlockRef]:
-        del document_id, parent_block_id, blocks
+        del document_id, parent_block_id
+        self.block_payloads.extend(blocks)
         self._operation("blocks", operation_key)
         return [BlockRef(f"block-{self.operation_count}")]
 
@@ -84,7 +87,6 @@ def result(verdict: Verdict, marker: str) -> InspectionResult:
             unverifiable_reason="image is obscured",
             verdict=verdict,
             summary=marker,
-            overall_confidence=1,
             findings=[],
         )
     finding_status = FindingStatus.FAIL if verdict is Verdict.FAIL else FindingStatus.PASS
@@ -92,7 +94,6 @@ def result(verdict: Verdict, marker: str) -> InspectionResult:
         image_valid=True,
         verdict=verdict,
         summary=marker,
-        overall_confidence=0.9,
         findings=[
             Finding(
                 rule_id="badge",
@@ -100,7 +101,6 @@ def result(verdict: Verdict, marker: str) -> InspectionResult:
                 status=finding_status,
                 observation=marker,
                 visual_evidence=f"visible-{marker}",
-                confidence=0.9,
             )
         ],
     )
@@ -165,6 +165,14 @@ def test_report_projection_matches_result_counts(report_fixture) -> None:
         "failed": 0,
     }
     assert [item.filename for item in projection.items] == ["001.png", "002.png", "003.png"]
+
+
+@pytest.mark.asyncio
+async def test_report_does_not_render_model_confidence(report_fixture) -> None:
+    await report_fixture.builder.export(report_fixture.task_id)
+
+    rendered = json.dumps(report_fixture.feishu.block_payloads, ensure_ascii=False)
+    assert "置信度" not in rendered
 
 
 @pytest.mark.asyncio

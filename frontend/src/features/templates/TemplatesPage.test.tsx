@@ -126,4 +126,5 @@ test("previews the final prompt and renders a single image result", async () => 
 
   expect(await screen.findByText("工牌缺失")).toBeInTheDocument();
   expect(screen.getByText("左胸区域无遮挡，未出现工牌")).toBeInTheDocument();
+  expect(screen.queryAllByText("94%")).toHaveLength(0);
 });

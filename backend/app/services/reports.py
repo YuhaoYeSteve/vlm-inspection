@@ -267,8 +267,7 @@ class ReportBuilder:
         result = item.result
         blocks.append(
             self._text_block(
-                f"结论：{result.verdict.value}\n置信度：{result.overall_confidence:.2f}\n"
-                f"摘要：{result.summary}"
+                f"结论：{result.verdict.value}\n摘要：{result.summary}"
             )
         )
         for finding in result.findings:

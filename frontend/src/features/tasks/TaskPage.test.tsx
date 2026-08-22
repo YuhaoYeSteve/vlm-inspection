@@ -15,7 +15,6 @@ const finding = {
   status: "fail" as const,
   observation: "左胸未见工牌",
   visual_evidence: "左胸区域无遮挡，未出现工牌",
-  confidence: 0.92,
 };
 
 const taskDetail: TaskDetail = {
@@ -52,7 +51,6 @@ const taskDetail: TaskDetail = {
         unverifiable_reason: null,
         verdict: "pass",
         summary: "仪容项目通过",
-        overall_confidence: 0.95,
         findings: [{ ...finding, status: "pass", observation: "工牌清晰可见" }],
       },
     },
@@ -73,7 +71,6 @@ const taskDetail: TaskDetail = {
         unverifiable_reason: null,
         verdict: "fail",
         summary: "工牌缺失",
-        overall_confidence: 0.92,
         findings: [finding],
       },
     },

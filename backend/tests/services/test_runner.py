@@ -24,7 +24,6 @@ def passing_result(marker: str) -> InspectionResult:
         image_valid=True,
         verdict=Verdict.PASS,
         summary=marker,
-        overall_confidence=0.9,
         findings=[
             Finding(
                 rule_id="uniform",
@@ -32,7 +31,6 @@ def passing_result(marker: str) -> InspectionResult:
                 status=FindingStatus.PASS,
                 observation="clean",
                 visual_evidence=marker,
-                confidence=0.9,
             )
         ],
     )
