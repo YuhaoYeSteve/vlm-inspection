@@ -121,7 +121,7 @@ flowchart LR
 
 - API Base URL，默认 `https://ark.cn-beijing.volces.com/api/v3`。
 - API 协议：Responses（默认）或 Chat Completions。
-- 模型 ID / Endpoint ID，接受模型 ID 或 `ep-...`。
+- 模型 ID / Endpoint ID，接受模型 ID 或以 `ep-` 开头的 Endpoint ID。
 - API Key。
 - 并发数，默认 3，允许 1–5。
 - 单图超时，默认 120 秒。
@@ -134,7 +134,7 @@ flowchart LR
 - 自建应用 App ID。
 - App Secret。
 - 固定本机回调地址 `http://127.0.0.1:8000/api/auth/feishu/callback`。
-- 浏览器 OAuth 授权、授权状态和重新授权。
+- 浏览器 OAuth v3 授权，使用 PKCE S256、一次性 state、授权状态和重新授权。
 - 可选的默认报告文件夹链接或 token；留空时写入用户根目录。
 - 设置页提供在飞书开放平台配置回调地址及最小权限的操作说明。权限能力限定为：创建及编辑 Docx、在选定目录创建文档、上传 Docx 图片素材。
 
@@ -359,6 +359,7 @@ QUEUED → RUNNING → SUCCEEDED
 - 日志过滤 `Authorization`、API Key、OAuth code、令牌和图片 Base64。
 - CORS 只允许自身页面；服务只绑定 `127.0.0.1`。
 - OAuth 使用随机 `state`，验证回调并防止重放。
+- OAuth token 交换使用当前的 v3 端点 `https://accounts.feishu.cn/oauth/v3/token`，不使用已标记为历史版本的 v2 端点。
 - 所有模型输入图片会发送至用户配置的火山方舟服务；生成报告时缩略图会发送至飞书。界面在首次运行前明确提示这两个数据流。
 - 任务删除提供明确确认，并只删除本地副本；飞书文档需由用户在飞书中管理。
 
@@ -430,6 +431,7 @@ QUEUED → RUNNING → SUCCEEDED
 - [火山方舟 OpenAI SDK 兼容说明](https://www.volcengine.com/docs/82379/1330626?lang=zh)
 - [火山方舟模型列表](https://www.volcengine.com/docs/82379/1554682)
 - [飞书创建 Docx](https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document/create?lang=zh-CN)
+- [飞书获取 user_access_token（最新 OAuth）](https://open.feishu.cn/document/authentication-management/access-token/get-user-access-token?lang=zh-CN)
 - [飞书 Docx 接入指南与块写入](https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/guide?lang=zh-CN)
 - [飞书上传云文档素材](https://open.feishu.cn/document/server-docs/docs/drive-v1/media/upload_all?lang=zh-CN)
 - [飞书素材能力与频控](https://open.feishu.cn/document/server-docs/docs/drive-v1/media/introduction?lang=zh-CN)
