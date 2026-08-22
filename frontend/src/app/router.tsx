@@ -1,6 +1,7 @@
 import { Navigate, createBrowserRouter } from "react-router-dom";
 
 import { SettingsPage } from "../features/settings/SettingsPage";
+import { TaskPage, TaskRoutePage } from "../features/tasks/TaskPage";
 import { TemplatesPage } from "../features/templates/TemplatesPage";
 import { App } from "./App";
 
@@ -24,11 +25,11 @@ export const router = createBrowserRouter([
       { index: true, element: <Navigate to="/tasks/new" replace /> },
       {
         path: "tasks/new",
-        element: <Placeholder title="运行巡检" description="创建任务并导入 1 到 100 张图片。" />,
+        element: <TaskPage />,
       },
       {
         path: "tasks/:taskId",
-        element: <Placeholder title="任务详情" description="查看进度、图片与逐项证据。" />,
+        element: <TaskRoutePage />,
       },
       {
         path: "templates",
