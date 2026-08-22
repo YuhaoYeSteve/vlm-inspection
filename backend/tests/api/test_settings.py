@@ -110,3 +110,30 @@ def test_rejects_out_of_range_concurrency(app_harness) -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_ark_connection_uses_real_vision_adapter_path(app_harness) -> None:
+    saved = app_harness.client.put(
+        "/api/settings/ark",
+        json={
+            "base_url": "https://ark.example/v3",
+            "protocol": "responses",
+            "model": "seed-vision-endpoint",
+            "api_key": "connection-test-secret",
+            "concurrency": 3,
+            "timeout_seconds": 120,
+            "max_retries": 2,
+            "thinking": "disabled",
+        },
+    )
+    assert saved.status_code == 200
+
+    response = app_harness.client.post("/api/settings/ark/test")
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+    assert response.json()["protocol"] == "responses"
+    assert response.json()["model"] == "seed-vision-endpoint"
+    assert response.json()["latency_ms"] >= 0
+    assert app_harness.inspector.call_count == 1
+    assert "connection-test-secret" not in response.text

@@ -11,12 +11,14 @@ from app.api.templates import seed_templates_if_empty
 from app.core.config import Settings
 from app.core.db import make_engine, make_session_factory
 from app.core.secrets import KeyringSecretStore, SecretStoreProtocol
+from app.services.ark import InspectionServiceProtocol
 
 
 def create_app(
     settings: Settings | None = None,
     engine: Engine | None = None,
     secret_store: SecretStoreProtocol | None = None,
+    inspection_service: InspectionServiceProtocol | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings()
     if engine is None:
@@ -33,6 +35,7 @@ def create_app(
     app.state.settings = resolved_settings
     app.state.sessions = make_session_factory(resolved_engine)
     app.state.secret_store = secret_store or KeyringSecretStore()
+    app.state.inspection_service = inspection_service
 
     @app.exception_handler(ApiError)
     async def handle_api_error(_request: Request, exc: ApiError) -> JSONResponse:

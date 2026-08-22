@@ -28,6 +28,13 @@ class ArkSettingsRead(BaseModel):
     api_key_configured: bool
 
 
+class ArkTestResult(BaseModel):
+    ok: bool
+    protocol: Literal["responses", "chat"]
+    model: str
+    latency_ms: int
+
+
 class FeishuSettingsWrite(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

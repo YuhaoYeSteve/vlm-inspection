@@ -1,3 +1,4 @@
+import time
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
@@ -5,14 +6,17 @@ from sqlalchemy.orm import Session
 
 from app.api.errors import ApiError
 from app.core.secrets import SecretStoreProtocol
-from app.dependencies import get_secret_store, get_session
+from app.dependencies import ArkDependencies, get_ark_dependencies, get_secret_store, get_session
 from app.repositories import SettingsRepository
 from app.schemas import (
     ArkSettingsRead,
     ArkSettingsWrite,
+    ArkTestResult,
     FeishuSettingsRead,
     FeishuSettingsWrite,
 )
+from app.services.ark import ArkRequestError, MalformedInspectionResult
+from app.services.prompts import SYSTEM_EVIDENCE_POLICY
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -89,6 +93,28 @@ def save_ark_settings(
     SettingsRepository(session).set("ark", public)
     session.commit()
     return _ark_response(public, secrets)
+
+
+@router.post("/ark/test", response_model=ArkTestResult)
+def test_ark_connection(
+    deps: Annotated[ArkDependencies, Depends(get_ark_dependencies)],
+) -> ArkTestResult:
+    started = time.monotonic()
+    try:
+        deps.inspector.inspect(
+            deps.runtime_config,
+            SYSTEM_EVIDENCE_POLICY,
+            "检查图片是否可读取，并按固定结构返回。",
+            deps.bundled_test_image,
+        )
+    except (ArkRequestError, MalformedInspectionResult) as exc:
+        raise ApiError(502, "ark_connection_failed", "方舟视觉模型连接测试失败。") from exc
+    return ArkTestResult(
+        ok=True,
+        protocol=deps.runtime_config.protocol,
+        model=deps.runtime_config.model,
+        latency_ms=round((time.monotonic() - started) * 1000),
+    )
 
 
 @router.get("/feishu", response_model=FeishuSettingsRead)
