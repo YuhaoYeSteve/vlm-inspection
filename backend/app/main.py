@@ -1,7 +1,9 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import Engine
 
 from app.api.errors import ApiError
@@ -29,6 +31,7 @@ def create_app(
     inspection_service: InspectionServiceProtocol | None = None,
     feishu_http_client: AsyncHttpClientProtocol | None = None,
     feishu_client: FeishuClientProtocol | None = None,
+    frontend_dist: Path | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings()
     if engine is None:
@@ -93,7 +96,26 @@ def create_app(
     app.include_router(feishu_auth_router)
     app.include_router(templates_router)
     app.include_router(tasks_router)
+    mount_frontend(
+        app,
+        frontend_dist or Path(__file__).resolve().parents[2] / "frontend" / "dist",
+    )
     return app
+
+
+def mount_frontend(app: FastAPI, dist: Path) -> None:
+    index = dist / "index.html"
+    if not index.is_file():
+        return
+    assets = dist / "assets"
+    if assets.is_dir():
+        app.mount("/assets", StaticFiles(directory=assets), name="assets")
+
+    @app.get("/{path:path}", include_in_schema=False)
+    def spa(path: str) -> FileResponse:
+        if path == "api" or path.startswith("api/"):
+            raise HTTPException(status_code=404)
+        return FileResponse(index)
 
 
 app = create_app()
