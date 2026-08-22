@@ -19,6 +19,8 @@ from app.domain.states import InvalidTransition, TaskStatus
 from app.models import InspectionTask
 from app.repositories import SettingsRepository, TemplateRepository
 from app.schemas import (
+    ReportAccepted,
+    ReportRequest,
     TaskActionAccepted,
     TaskCounts,
     TaskCreate,
@@ -31,6 +33,7 @@ from app.schemas import (
 )
 from app.services.events import TaskEventBroker
 from app.services.images import DuplicateImage, UnsupportedImage
+from app.services.reports import ReportConfirmationRequired, ReportNotReady
 from app.services.runner import TaskAlreadyRunning
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
@@ -58,6 +61,7 @@ def _task_counts(deps: TaskDependencies, task_id: str) -> TaskCounts:
 def _task_summary(deps: TaskDependencies, task: InspectionTask) -> TaskSummary:
     template = task.template_snapshot_json
     model = task.model_snapshot_json
+    report = deps.repo.get_active_export(task.id)
     return TaskSummary(
         id=task.id,
         name=task.name,
@@ -69,6 +73,9 @@ def _task_summary(deps: TaskDependencies, task: InspectionTask) -> TaskSummary:
         started_at=task.started_at,
         completed_at=task.completed_at,
         counts=_task_counts(deps, task.id),
+        report_id=None if report is None else report.id,
+        report_status=None if report is None else report.status,
+        report_url=None if report is None else report.document_url,
     )
 
 
@@ -344,3 +351,47 @@ async def task_events(
                     yield ServerSentEvent(comment="heartbeat")
 
     return EventSourceResponse(stream())
+
+
+@router.post("/{task_id}/report", response_model=ReportAccepted, status_code=202)
+async def generate_report(
+    task_id: str,
+    body: ReportRequest,
+    deps: Annotated[TaskDependencies, Depends(get_task_dependencies)],
+) -> ReportAccepted:
+    try:
+        deps.repo.get_task(task_id)
+        export_id = await deps.reports.enqueue(
+            task_id,
+            include_failures=body.include_failures,
+        )
+    except LookupError as exc:
+        raise _not_found(task_id) from exc
+    except ReportConfirmationRequired as exc:
+        raise ApiError(
+            409,
+            "report_confirmation_required",
+            "任务包含执行失败图片，请确认带失败项生成报告。",
+        ) from exc
+    except ReportNotReady as exc:
+        raise ApiError(409, "feishu_not_connected", "请先完成飞书授权。") from exc
+    return ReportAccepted(export_id=export_id)
+
+
+@router.post("/{task_id}/report/new-version", response_model=ReportAccepted, status_code=202)
+async def generate_new_report_version(
+    task_id: str,
+    deps: Annotated[TaskDependencies, Depends(get_task_dependencies)],
+) -> ReportAccepted:
+    try:
+        deps.repo.get_task(task_id)
+        export_id = await deps.reports.enqueue(
+            task_id,
+            include_failures=True,
+            new_version=True,
+        )
+    except LookupError as exc:
+        raise _not_found(task_id) from exc
+    except ReportNotReady as exc:
+        raise ApiError(409, "feishu_not_connected", "请先完成飞书授权。") from exc
+    return ReportAccepted(export_id=export_id)

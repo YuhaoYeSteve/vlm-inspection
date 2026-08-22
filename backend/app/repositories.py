@@ -302,6 +302,85 @@ class TaskRepository:
             self.session.flush()
         return export
 
+    def get_active_export(self, task_id: str) -> ReportExport | None:
+        return self.session.scalar(
+            select(ReportExport).where(
+                ReportExport.task_id == task_id,
+                ReportExport.is_active.is_(True),
+            )
+        )
+
+    def get_export(self, export_id: str) -> ReportExport:
+        export = self.session.get(ReportExport, export_id)
+        if export is None:
+            raise LookupError(export_id)
+        return export
+
+    def create_new_export(self, task_id: str) -> ReportExport:
+        self.get_task(task_id)
+        active = self.session.scalar(
+            select(ReportExport).where(
+                ReportExport.task_id == task_id,
+                ReportExport.is_active.is_(True),
+            )
+        )
+        if active is not None:
+            active.is_active = False
+            self.session.flush()
+        export = ReportExport(task_id=task_id, status=ReportStatus.PENDING.value)
+        self.session.add(export)
+        self.session.flush()
+        return export
+
+    def save_export_document(
+        self,
+        export_id: str,
+        document_id: str,
+        document_url: str,
+    ) -> ReportExport:
+        export = self.get_export(export_id)
+        export.document_id = document_id
+        export.document_url = document_url
+        return export
+
+    def operation_completed(self, export_id: str, operation_key: str) -> bool:
+        return operation_key in self.get_export(export_id).completed_operations_json
+
+    def mark_operation_completed(self, export_id: str, operation_key: str) -> ReportExport:
+        export = self.get_export(export_id)
+        if operation_key not in export.completed_operations_json:
+            export.completed_operations_json = [
+                *export.completed_operations_json,
+                operation_key,
+            ]
+            export.cursor += 1
+        return export
+
+    def save_remote_block(
+        self,
+        export_id: str,
+        operation_key: str,
+        block_id: str,
+    ) -> ReportExport:
+        export = self.get_export(export_id)
+        export.remote_blocks_json = {
+            **export.remote_blocks_json,
+            operation_key: block_id,
+        }
+        return export
+
+    def recover_interrupted_exports(self) -> int:
+        exports = self.session.scalars(
+            select(ReportExport).where(ReportExport.status == ReportStatus.RUNNING.value)
+        ).all()
+        for export in exports:
+            export.status = ReportStatus.FAILED.value
+            export.error_code = "report_interrupted"
+            task = self.get_task(export.task_id)
+            if TaskStatus(task.status) is TaskStatus.EXPORTING:
+                task.status = TaskStatus.REVIEW_REQUIRED.value
+        return len(exports)
+
     def recover_interrupted_work(self) -> int:
         running_tasks = self.session.scalars(
             select(InspectionTask).where(InspectionTask.status == TaskStatus.RUNNING.value)

@@ -16,7 +16,9 @@ from app.core.secrets import KeyringSecretStore, SecretStoreProtocol
 from app.repositories import TaskRepository
 from app.services.ark import InspectionServiceProtocol, KeychainArkInspectionService
 from app.services.events import TaskEventBroker
+from app.services.feishu_client import FeishuClient, FeishuClientProtocol
 from app.services.feishu_oauth import AsyncHttpClientProtocol, FeishuOAuthService
+from app.services.reports import ReportBuilder, ReportCoordinator
 from app.services.runner import TaskRunner
 
 
@@ -26,6 +28,7 @@ def create_app(
     secret_store: SecretStoreProtocol | None = None,
     inspection_service: InspectionServiceProtocol | None = None,
     feishu_http_client: AsyncHttpClientProtocol | None = None,
+    feishu_client: FeishuClientProtocol | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings()
     if engine is None:
@@ -37,23 +40,33 @@ def create_app(
         resolved_secret_store
     )
     events = TaskEventBroker()
-    runner = TaskRunner(sessions, resolved_inspection_service, events=events)
     feishu_oauth = FeishuOAuthService(
         sessions,
         resolved_secret_store,
         http=feishu_http_client,
+    )
+    resolved_feishu_client = feishu_client or FeishuClient(feishu_oauth)
+    report_builder = ReportBuilder(sessions, resolved_feishu_client)
+    report_coordinator = ReportCoordinator(report_builder, feishu_oauth, events)
+    runner = TaskRunner(
+        sessions,
+        resolved_inspection_service,
+        events=events,
+        report_callback=report_coordinator.enqueue_auto,
     )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         with app.state.sessions() as session:
             seed_templates_if_empty(session)
+            TaskRepository(session).recover_interrupted_exports()
             TaskRepository(session).recover_interrupted_work()
             session.commit()
         try:
             yield
         finally:
             await app.state.runner.shutdown()
+            await app.state.report_coordinator.shutdown()
 
     app = FastAPI(title="Seed VLM Inspector", version="0.1.0", lifespan=lifespan)
     app.state.settings = resolved_settings
@@ -63,6 +76,7 @@ def create_app(
     app.state.event_broker = events
     app.state.runner = runner
     app.state.feishu_oauth = feishu_oauth
+    app.state.report_coordinator = report_coordinator
 
     @app.exception_handler(ApiError)
     async def handle_api_error(_request: Request, exc: ApiError) -> JSONResponse:

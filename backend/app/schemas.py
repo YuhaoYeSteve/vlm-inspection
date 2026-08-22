@@ -144,6 +144,9 @@ class TaskSummary(BaseModel):
     started_at: datetime | None
     completed_at: datetime | None
     counts: TaskCounts
+    report_id: str | None = None
+    report_status: str | None = None
+    report_url: str | None = None
 
 
 class TaskDetail(TaskSummary):
@@ -171,4 +174,15 @@ class UploadSummary(BaseModel):
 
 class TaskActionAccepted(BaseModel):
     task_id: str
+    status: Literal["accepted"] = "accepted"
+
+
+class ReportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    include_failures: bool = False
+
+
+class ReportAccepted(BaseModel):
+    export_id: str
     status: Literal["accepted"] = "accepted"

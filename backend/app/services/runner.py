@@ -1,6 +1,6 @@
 import asyncio
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Literal, cast
 
@@ -44,6 +44,7 @@ class TaskRunner:
         concurrency: int = 3,
         events: TaskEventBroker | None = None,
         sleep: Callable[[float], None] = time.sleep,
+        report_callback: Callable[[str], Awaitable[object]] | None = None,
     ) -> None:
         if not 1 <= concurrency <= 5:
             raise ValueError("concurrency must be between 1 and 5")
@@ -52,6 +53,7 @@ class TaskRunner:
         self.concurrency = concurrency
         self.events = events or TaskEventBroker()
         self.sleep = sleep
+        self.report_callback = report_callback
         self._active_tasks: dict[str, asyncio.Task[None]] = {}
 
     async def run_task(self, task_id: str) -> None:
@@ -69,6 +71,8 @@ class TaskRunner:
                 task_id,
                 {"type": "task.updated", "task_id": task_id, "status": target.value},
             )
+            if target is TaskStatus.EXPORTING and self.report_callback is not None:
+                await self.report_callback(task_id)
 
     def start(self, task_id: str) -> None:
         active = self._active_tasks.get(task_id)

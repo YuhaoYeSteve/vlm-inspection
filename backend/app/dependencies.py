@@ -14,6 +14,7 @@ from app.services.ark import ArkInspectionService, ArkRuntimeConfig, InspectionS
 from app.services.events import TaskEventBroker
 from app.services.feishu_oauth import FeishuOAuthProtocol
 from app.services.images import ImageIngestor
+from app.services.reports import ReportCoordinator
 from app.services.runner import TaskRunner
 
 
@@ -75,6 +76,7 @@ class TaskDependencies:
     repo: TaskRepository
     ingestor: ImageIngestor
     runner: TaskRunner
+    reports: ReportCoordinator
     data_dir: Path
 
 
@@ -88,6 +90,7 @@ def get_task_dependencies(
         repo=TaskRepository(session),
         ingestor=ImageIngestor(data_dir / "images"),
         runner=request.app.state.runner,
+        reports=request.app.state.report_coordinator,
         data_dir=data_dir,
     )
 
