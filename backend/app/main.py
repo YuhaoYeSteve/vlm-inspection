@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import Engine
 
 from app.api.errors import ApiError
+from app.api.feishu_auth import router as feishu_auth_router
 from app.api.settings import router as settings_router
 from app.api.tasks import router as tasks_router
 from app.api.templates import router as templates_router
@@ -15,6 +16,7 @@ from app.core.secrets import KeyringSecretStore, SecretStoreProtocol
 from app.repositories import TaskRepository
 from app.services.ark import InspectionServiceProtocol, KeychainArkInspectionService
 from app.services.events import TaskEventBroker
+from app.services.feishu_oauth import AsyncHttpClientProtocol, FeishuOAuthService
 from app.services.runner import TaskRunner
 
 
@@ -23,6 +25,7 @@ def create_app(
     engine: Engine | None = None,
     secret_store: SecretStoreProtocol | None = None,
     inspection_service: InspectionServiceProtocol | None = None,
+    feishu_http_client: AsyncHttpClientProtocol | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings()
     if engine is None:
@@ -35,6 +38,11 @@ def create_app(
     )
     events = TaskEventBroker()
     runner = TaskRunner(sessions, resolved_inspection_service, events=events)
+    feishu_oauth = FeishuOAuthService(
+        sessions,
+        resolved_secret_store,
+        http=feishu_http_client,
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -54,6 +62,7 @@ def create_app(
     app.state.inspection_service = inspection_service
     app.state.event_broker = events
     app.state.runner = runner
+    app.state.feishu_oauth = feishu_oauth
 
     @app.exception_handler(ApiError)
     async def handle_api_error(_request: Request, exc: ApiError) -> JSONResponse:
@@ -67,6 +76,7 @@ def create_app(
         return {"status": "ready"}
 
     app.include_router(settings_router)
+    app.include_router(feishu_auth_router)
     app.include_router(templates_router)
     app.include_router(tasks_router)
     return app

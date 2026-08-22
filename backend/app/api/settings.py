@@ -16,6 +16,7 @@ from app.schemas import (
     FeishuSettingsWrite,
 )
 from app.services.ark import ArkRequestError, MalformedInspectionResult
+from app.services.feishu_oauth import DEFAULT_FEISHU_REDIRECT_URI
 from app.services.prompts import SYSTEM_EVIDENCE_POLICY
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -29,7 +30,7 @@ ARK_DEFAULTS: dict[str, Any] = {
     "max_retries": 2,
     "thinking": "disabled",
 }
-FEISHU_CALLBACK_URL = "http://127.0.0.1:8000/api/auth/feishu/callback"
+FEISHU_CALLBACK_URL = DEFAULT_FEISHU_REDIRECT_URI
 
 
 def _secret_is_configured(secrets: SecretStoreProtocol, key: str) -> bool:

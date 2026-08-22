@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
 
+import httpx
 import pytest
 from PIL import Image
 from starlette.testclient import TestClient
@@ -35,6 +36,7 @@ class AppHarness:
     database_path: Path
     secrets: FakeSecretStore
     inspector: "FakeInspectionService"
+    feishu_http: "FakeFeishuHttp"
 
     @property
     def seeded_template_id(self) -> str:
@@ -81,6 +83,24 @@ class FakeInspectionService:
         )
 
 
+@dataclass
+class FakeFeishuHttp:
+    posts: list[dict] = field(default_factory=list)
+
+    async def post(self, url: str, **kwargs):
+        self.posts.append({"url": url, **kwargs})
+        return httpx.Response(
+            200,
+            json={
+                "access_token": "access-api",
+                "refresh_token": "refresh-api",
+                "expires_in": 7200,
+                "refresh_token_expires_in": 2_592_000,
+            },
+            request=httpx.Request("POST", url),
+        )
+
+
 @pytest.fixture
 def app_harness(tmp_path: Path) -> Iterator[AppHarness]:
     database_path = tmp_path / "app.db"
@@ -88,12 +108,14 @@ def app_harness(tmp_path: Path) -> Iterator[AppHarness]:
     Base.metadata.create_all(engine)
     secrets = FakeSecretStore()
     inspector = FakeInspectionService()
+    feishu_http = FakeFeishuHttp()
     with TestClient(
         create_app(
             settings=Settings(data_dir=tmp_path / "data"),
             engine=engine,
             secret_store=secrets,
             inspection_service=inspector,
+            feishu_http_client=feishu_http,
         )
     ) as client:
         yield AppHarness(
@@ -101,6 +123,7 @@ def app_harness(tmp_path: Path) -> Iterator[AppHarness]:
             database_path=database_path,
             secrets=secrets,
             inspector=inspector,
+            feishu_http=feishu_http,
         )
 
 

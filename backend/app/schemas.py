@@ -50,6 +50,16 @@ class FeishuSettingsRead(BaseModel):
     app_secret_configured: bool
 
 
+class FeishuAuthorizationStart(BaseModel):
+    authorization_url: str
+
+
+class FeishuAuthStatus(BaseModel):
+    configured: bool
+    connected: bool
+    expires_at: int | None
+
+
 class TemplateRule(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

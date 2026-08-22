@@ -12,6 +12,7 @@ from app.repositories import SettingsRepository, TaskRepository
 from app.schemas import ArkSettingsRead
 from app.services.ark import ArkInspectionService, ArkRuntimeConfig, InspectionServiceProtocol
 from app.services.events import TaskEventBroker
+from app.services.feishu_oauth import FeishuOAuthProtocol
 from app.services.images import ImageIngestor
 from app.services.runner import TaskRunner
 
@@ -93,3 +94,7 @@ def get_task_dependencies(
 
 def get_event_broker(request: Request) -> TaskEventBroker:
     return request.app.state.event_broker
+
+
+def get_feishu_oauth(request: Request) -> FeishuOAuthProtocol:
+    return request.app.state.feishu_oauth
