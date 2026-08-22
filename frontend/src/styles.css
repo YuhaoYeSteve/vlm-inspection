@@ -1,0 +1,249 @@
+:root {
+  color: #252522;
+  background: #f3efe9;
+  font-family: "Avenir Next", "SF Pro Display", "Helvetica Neue", "PingFang SC", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  --canvas: #f3efe9;
+  --surface: #fffdf9;
+  --surface-muted: #ebe6de;
+  --sidebar: #252522;
+  --sidebar-muted: #aaa49b;
+  --ink: #252522;
+  --ink-muted: #716a62;
+  --accent: #66775c;
+  --accent-soft: #e7eee2;
+  --danger: #9b4637;
+  --danger-soft: #f7e5e1;
+  --warning: #9a6d31;
+  --warning-soft: #f7ecd8;
+  --info-soft: #e3edf1;
+  --line: #d7d0c7;
+  --radius: 10px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 320px;
+  background: var(--canvas);
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100dvh;
+  background: var(--canvas);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid rgb(102 119 92 / 24%);
+  outline-offset: 2px;
+}
+
+.app-shell {
+  min-height: 100dvh;
+}
+
+.sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 20;
+  display: flex;
+  width: 248px;
+  flex-direction: column;
+  padding: 28px 18px 20px;
+  color: #f5f1e9;
+  background: var(--sidebar);
+  border-right: 1px solid rgb(255 255 255 / 8%);
+}
+
+.brand-lockup {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 10px 30px;
+}
+
+.brand-mark {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  color: var(--sidebar);
+  background: #d8e0cf;
+  border-radius: 6px;
+  font-family: "SF Mono", "JetBrains Mono", monospace;
+  font-weight: 800;
+}
+
+.brand-lockup strong,
+.brand-lockup span {
+  display: block;
+}
+
+.brand-lockup strong {
+  font-size: 15px;
+  letter-spacing: 0.02em;
+}
+
+.brand-lockup div > span {
+  margin-top: 3px;
+  color: var(--sidebar-muted);
+  font-size: 11px;
+}
+
+.sidebar nav {
+  display: grid;
+  gap: 4px;
+}
+
+.nav-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 0 12px;
+  color: #c9c4bc;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  text-decoration: none;
+  transition: color 160ms ease, background-color 160ms ease, transform 120ms ease;
+}
+
+.nav-link:hover {
+  color: #fffdf9;
+  background: rgb(255 255 255 / 6%);
+}
+
+.nav-link:active {
+  transform: scale(0.98);
+}
+
+.nav-link.is-active {
+  color: #fffdf9;
+  background: rgb(255 255 255 / 10%);
+  border-color: rgb(255 255 255 / 8%);
+}
+
+.sidebar-note {
+  margin: auto 10px 0;
+  color: #938d84;
+  font-size: 11px;
+  line-height: 1.65;
+}
+
+.app-content {
+  min-height: 100dvh;
+  margin-left: 248px;
+}
+
+.page {
+  width: min(1440px, 100%);
+  margin: 0 auto;
+  padding: 48px clamp(28px, 4vw, 64px) 72px;
+}
+
+.page-header {
+  max-width: 760px;
+}
+
+.page-header h1 {
+  margin: 8px 0 10px;
+  font-size: clamp(32px, 4vw, 52px);
+  line-height: 1.08;
+  letter-spacing: -0.045em;
+}
+
+.page-header > p:last-child {
+  margin: 0;
+  color: var(--ink-muted);
+  line-height: 1.7;
+}
+
+.section-label {
+  margin: 0;
+  color: var(--accent);
+  font-family: "SF Mono", "JetBrains Mono", monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.page-placeholder {
+  display: grid;
+  min-height: 70dvh;
+  align-items: center;
+}
+
+@media (max-width: 760px) {
+  .app-shell {
+    padding-bottom: 72px;
+  }
+
+  .sidebar {
+    inset: auto 0 0;
+    width: 100%;
+    height: 68px;
+    flex-direction: row;
+    padding: 8px 10px;
+    border-top: 1px solid rgb(255 255 255 / 10%);
+    border-right: 0;
+  }
+
+  .brand-lockup,
+  .sidebar-note {
+    display: none;
+  }
+
+  .sidebar nav {
+    display: grid;
+    width: 100%;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .nav-link {
+    min-height: 50px;
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+    padding: 3px;
+    font-size: 10px;
+  }
+
+  .app-content {
+    margin-left: 0;
+  }
+
+  .page {
+    padding: 28px 18px 48px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
