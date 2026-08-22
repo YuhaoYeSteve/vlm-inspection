@@ -8,9 +8,12 @@ from sqlalchemy.orm import Session
 
 from app.api.errors import ApiError
 from app.core.secrets import SecretStoreProtocol
-from app.repositories import SettingsRepository
+from app.repositories import SettingsRepository, TaskRepository
 from app.schemas import ArkSettingsRead
 from app.services.ark import ArkInspectionService, ArkRuntimeConfig, InspectionServiceProtocol
+from app.services.events import TaskEventBroker
+from app.services.images import ImageIngestor
+from app.services.runner import TaskRunner
 
 
 def get_session(request: Request) -> Iterator[Session]:
@@ -63,3 +66,30 @@ def get_ark_dependencies(
         inspector=inspector,
         bundled_test_image=Path(__file__).parent / "assets" / "ark_test.png",
     )
+
+
+@dataclass(frozen=True)
+class TaskDependencies:
+    session: Session
+    repo: TaskRepository
+    ingestor: ImageIngestor
+    runner: TaskRunner
+    data_dir: Path
+
+
+def get_task_dependencies(
+    request: Request,
+    session: Annotated[Session, Depends(get_session)],
+) -> TaskDependencies:
+    data_dir: Path = request.app.state.settings.data_dir
+    return TaskDependencies(
+        session=session,
+        repo=TaskRepository(session),
+        ingestor=ImageIngestor(data_dir / "images"),
+        runner=request.app.state.runner,
+        data_dir=data_dir,
+    )
+
+
+def get_event_broker(request: Request) -> TaskEventBroker:
+    return request.app.state.event_broker

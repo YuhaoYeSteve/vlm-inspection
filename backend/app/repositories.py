@@ -165,6 +165,51 @@ class TaskRepository:
             raise LookupError(image_id)
         return image
 
+    def get_task_image(self, task_id: str, image_id: str) -> TaskImage:
+        image = self.session.scalar(
+            select(TaskImage).where(TaskImage.id == image_id, TaskImage.task_id == task_id)
+        )
+        if image is None:
+            raise LookupError(image_id)
+        return image
+
+    def list_tasks(self) -> list[InspectionTask]:
+        return list(
+            self.session.scalars(
+                select(InspectionTask).order_by(
+                    InspectionTask.created_at.desc(),
+                    InspectionTask.id.desc(),
+                )
+            )
+        )
+
+    def list_images(self, task_id: str) -> list[TaskImage]:
+        self.get_task(task_id)
+        return list(
+            self.session.scalars(
+                select(TaskImage)
+                .where(TaskImage.task_id == task_id)
+                .order_by(TaskImage.position)
+            )
+        )
+
+    def count_images(self, task_id: str) -> int:
+        self.get_task(task_id)
+        return int(
+            self.session.scalar(
+                select(func.count()).select_from(TaskImage).where(TaskImage.task_id == task_id)
+            )
+            or 0
+        )
+
+    def get_current_result(self, image_id: str) -> InferenceResultRecord | None:
+        return self.session.scalar(
+            select(InferenceResultRecord).where(
+                InferenceResultRecord.image_id == image_id,
+                InferenceResultRecord.is_current.is_(True),
+            )
+        )
+
     def set_task_status(self, task_id: str, status: TaskStatus) -> InspectionTask:
         task = self.get_task(task_id)
         require_task_transition(TaskStatus(task.status), status)

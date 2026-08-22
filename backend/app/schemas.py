@@ -91,3 +91,74 @@ class TemplateDetail(TemplateSummary):
     task_prompt: str
     rules: list[TemplateRule]
     model_params: dict[str, Any]
+
+
+class TaskCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=200)
+    template_id: str = Field(min_length=1)
+
+
+class TaskCounts(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    passed: int = Field(default=0, alias="pass")
+    fail: int = 0
+    unverifiable: int = 0
+    failed: int = 0
+
+
+class TaskImageRead(BaseModel):
+    id: str
+    position: int
+    original_name: str
+    sha256: str
+    status: str
+    attempt_count: int
+    error_code: str | None
+    error_message: str | None
+    original_url: str
+    thumbnail_url: str
+    result: dict[str, Any] | None
+
+
+class TaskSummary(BaseModel):
+    id: str
+    name: str
+    status: str
+    template_name: str
+    template_version: int
+    model: str
+    created_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None
+    counts: TaskCounts
+
+
+class TaskDetail(TaskSummary):
+    template_snapshot: dict[str, Any]
+    model_snapshot: dict[str, Any]
+    images: list[TaskImageRead]
+
+
+class UploadAccepted(BaseModel):
+    id: str
+    filename: str
+    sha256: str
+
+
+class UploadIssue(BaseModel):
+    filename: str
+    reason: str
+
+
+class UploadSummary(BaseModel):
+    accepted: list[UploadAccepted]
+    skipped: list[UploadIssue]
+    rejected: list[UploadIssue]
+
+
+class TaskActionAccepted(BaseModel):
+    task_id: str
+    status: Literal["accepted"] = "accepted"

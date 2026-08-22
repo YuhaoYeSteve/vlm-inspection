@@ -111,13 +111,27 @@ class TaskFixture:
             return int(session.scalar(select(func.count()).select_from(InferenceAttempt)) or 0)
 
 
-def make_task_fixture(tmp_path: Path, image_count: int = 8) -> TaskFixture:
+def make_task_fixture(
+    tmp_path: Path,
+    image_count: int = 8,
+    configured_concurrency: int | None = None,
+) -> TaskFixture:
     tmp_path.mkdir(parents=True, exist_ok=True)
     engine = make_engine(tmp_path / f"runner-{image_count}.db")
     Base.metadata.create_all(engine)
     sessions = make_session_factory(engine)
     with sessions() as session:
         repo = TaskRepository(session)
+        model_snapshot = {
+            "base_url": "https://ark.example/v3",
+            "model": "seed",
+            "protocol": "responses",
+            "thinking": "disabled",
+            "timeout_seconds": 120,
+            "max_retries": 2,
+        }
+        if configured_concurrency is not None:
+            model_snapshot["concurrency"] = configured_concurrency
         task = repo.create_task(
             "runner test",
             {
@@ -127,14 +141,7 @@ def make_task_fixture(tmp_path: Path, image_count: int = 8) -> TaskFixture:
                     {"rule_id": "uniform", "name": "uniform", "text": "check uniform"}
                 ],
             },
-            {
-                "base_url": "https://ark.example/v3",
-                "model": "seed",
-                "protocol": "responses",
-                "thinking": "disabled",
-                "timeout_seconds": 120,
-                "max_retries": 2,
-            },
+            model_snapshot,
         )
         for position in range(image_count):
             image_path = tmp_path / f"{position}.jpg"
@@ -165,6 +172,17 @@ async def test_runner_never_exceeds_configured_concurrency(tmp_path) -> None:
         assert inspector.max_active == 3
         assert fixture.count_images("succeeded") == 8
         assert fixture.task_status() == TaskStatus.EXPORTING
+
+
+@pytest.mark.asyncio
+async def test_runner_uses_task_snapshot_concurrency(tmp_path) -> None:
+    fixture = make_task_fixture(tmp_path, image_count=6, configured_concurrency=2)
+    inspector = FakeInspector(delay=0.02)
+    runner = TaskRunner(fixture.sessions, inspector, concurrency=5)
+
+    await runner.run_task(fixture.task_id)
+
+    assert inspector.max_active == 2
 
 
 @pytest.mark.asyncio
@@ -212,6 +230,23 @@ async def test_event_broker_drops_oldest_when_subscriber_is_slow() -> None:
         await broker.publish("task-1", {"type": "three"})
         assert await asyncio.wait_for(queue.get(), 0.1) == {"type": "two"}
         assert await asyncio.wait_for(queue.get(), 0.1) == {"type": "three"}
+
+
+@pytest.mark.asyncio
+async def test_event_broker_replays_events_after_last_seen_id() -> None:
+    broker = TaskEventBroker(queue_size=4)
+    await broker.publish("task-1", {"type": "one"})
+    await broker.publish("task-1", {"type": "two"})
+    await broker.publish("task-1", {"type": "three"})
+
+    async with broker.subscribe("task-1", after_id="1") as queue:
+        second = await asyncio.wait_for(queue.get(), 0.1)
+        third = await asyncio.wait_for(queue.get(), 0.1)
+
+    assert second == {"type": "two"}
+    assert third == {"type": "three"}
+    assert second.event_id == "2"
+    assert third.event_id == "3"
 
 
 def test_application_startup_recovers_without_resuming_calls(tmp_path) -> None:

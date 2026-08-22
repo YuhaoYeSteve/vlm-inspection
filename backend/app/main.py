@@ -6,6 +6,7 @@ from sqlalchemy import Engine
 
 from app.api.errors import ApiError
 from app.api.settings import router as settings_router
+from app.api.tasks import router as tasks_router
 from app.api.templates import router as templates_router
 from app.api.templates import seed_templates_if_empty
 from app.core.config import Settings
@@ -67,6 +68,7 @@ def create_app(
 
     app.include_router(settings_router)
     app.include_router(templates_router)
+    app.include_router(tasks_router)
     return app
 
 

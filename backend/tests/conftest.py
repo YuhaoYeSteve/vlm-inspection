@@ -1,10 +1,14 @@
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from io import BytesIO
 from pathlib import Path
 
 import pytest
+from PIL import Image
 from starlette.testclient import TestClient
 
+from app.core.config import Settings
 from app.core.db import Base, make_engine
 from app.domain.results import Finding, FindingStatus, InspectionResult, Verdict
 from app.main import create_app
@@ -32,10 +36,18 @@ class AppHarness:
     secrets: FakeSecretStore
     inspector: "FakeInspectionService"
 
+    @property
+    def seeded_template_id(self) -> str:
+        response = self.client.get("/api/templates")
+        assert response.status_code == 200
+        return str(response.json()[0]["id"])
+
 
 @dataclass
 class FakeInspectionService:
     call_count: int = 0
+    delay: float = 0
+    error_status: int | None = None
 
     def inspect(
         self,
@@ -45,6 +57,12 @@ class FakeInspectionService:
         image_path: Path,
     ) -> InspectionResult:
         self.call_count += 1
+        if self.delay:
+            time.sleep(self.delay)
+        if self.error_status is not None:
+            from app.services.ark import ArkRequestError
+
+            raise ArkRequestError(self.error_status, {}, "fake_error")
         return InspectionResult(
             image_valid=True,
             verdict=Verdict.PASS,
@@ -71,7 +89,12 @@ def app_harness(tmp_path: Path) -> Iterator[AppHarness]:
     secrets = FakeSecretStore()
     inspector = FakeInspectionService()
     with TestClient(
-        create_app(engine=engine, secret_store=secrets, inspection_service=inspector)
+        create_app(
+            settings=Settings(data_dir=tmp_path / "data"),
+            engine=engine,
+            secret_store=secrets,
+            inspection_service=inspector,
+        )
     ) as client:
         yield AppHarness(
             client=client,
@@ -79,3 +102,10 @@ def app_harness(tmp_path: Path) -> Iterator[AppHarness]:
             secrets=secrets,
             inspector=inspector,
         )
+
+
+@pytest.fixture
+def png_file() -> bytes:
+    output = BytesIO()
+    Image.new("RGB", (64, 64), "white").save(output, format="PNG")
+    return output.getvalue()

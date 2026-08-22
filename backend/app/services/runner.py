@@ -52,12 +52,16 @@ class TaskRunner:
         self.concurrency = concurrency
         self.events = events or TaskEventBroker()
         self.sleep = sleep
-        self._semaphore = asyncio.Semaphore(concurrency)
         self._active_tasks: dict[str, asyncio.Task[None]] = {}
 
     async def run_task(self, task_id: str) -> None:
         self._mark_running(task_id)
-        workers = [asyncio.create_task(self._worker(task_id)) for _ in range(self.concurrency)]
+        concurrency = self._task_concurrency(task_id)
+        semaphore = asyncio.Semaphore(concurrency)
+        workers = [
+            asyncio.create_task(self._worker(task_id, semaphore))
+            for _ in range(concurrency)
+        ]
         await asyncio.gather(*workers)
         target = self._finalize_if_drained(task_id)
         if target is not None:
@@ -131,6 +135,11 @@ class TaskRunner:
             session.commit()
         self.start(image.task_id)
 
+    async def wait_until_idle(self, task_id: str) -> None:
+        active = self._active_tasks.get(task_id)
+        if active is not None and not active.done():
+            await asyncio.shield(active)
+
     async def shutdown(self) -> None:
         running = [task for task in self._active_tasks.values() if not task.done()]
         for task in running:
@@ -139,7 +148,7 @@ class TaskRunner:
             await asyncio.gather(*running, return_exceptions=True)
         self._active_tasks.clear()
 
-    async def _worker(self, task_id: str) -> None:
+    async def _worker(self, task_id: str, semaphore: asyncio.Semaphore) -> None:
         while self._task_is_running(task_id):
             image = self._claim_next_image(task_id)
             if image is None:
@@ -149,7 +158,7 @@ class TaskRunner:
                 {"type": "image.started", "task_id": task_id, "image_id": image.id},
             )
             try:
-                async with self._semaphore:
+                async with semaphore:
                     result = await asyncio.to_thread(self._inspect_with_retry, task_id, image)
                 self._save_success(image.id, result)
                 await self.events.publish(
@@ -179,6 +188,12 @@ class TaskRunner:
             elif TaskStatus(task.status) is not TaskStatus.RUNNING:
                 raise InvalidTransition(f"cannot run task from {task.status}")
             session.commit()
+
+    def _task_concurrency(self, task_id: str) -> int:
+        with self.sessions() as session:
+            task = TaskRepository(session).get_task(task_id)
+            configured = int(task.model_snapshot_json.get("concurrency", self.concurrency))
+        return configured if 1 <= configured <= 5 else self.concurrency
 
     def _task_is_running(self, task_id: str) -> bool:
         with self.sessions() as session:
