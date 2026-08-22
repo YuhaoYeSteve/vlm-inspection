@@ -35,7 +35,9 @@ export class ApiClient {
       headers.set("Content-Type", "application/json");
       body = JSON.stringify(options.body);
     }
-    const response = await fetch(`${this.baseUrl}${path}`, { ...options, headers, body });
+    const relativeUrl = `${this.baseUrl}${path}`;
+    const url = this.baseUrl ? relativeUrl : new URL(relativeUrl, window.location.origin).toString();
+    const response = await fetch(url, { ...options, headers, body });
     if (!response.ok) {
       const fallback = { code: "request_failed", message: `请求失败 (${response.status})` };
       const error = (await response.json().catch(() => fallback)) as Partial<typeof fallback> & {

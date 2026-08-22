@@ -1,5 +1,6 @@
 import { Navigate, createBrowserRouter } from "react-router-dom";
 
+import { SettingsPage } from "../features/settings/SettingsPage";
 import { App } from "./App";
 
 function Placeholder({ title, description }: { title: string; description: string }) {
@@ -38,7 +39,7 @@ export const router = createBrowserRouter([
       },
       {
         path: "settings",
-        element: <Placeholder title="连接设置" description="配置火山方舟与飞书授权。" />,
+        element: <SettingsPage />,
       },
     ],
   },
