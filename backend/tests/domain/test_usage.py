@@ -164,6 +164,57 @@ def test_bool_token_value_is_invalid_usage() -> None:
     assert call.raw_usage is not None
 
 
+@pytest.mark.parametrize(
+    "raw_usage",
+    [
+        pytest.param(
+            {
+                "input_tokens": 58,
+                "input_tokens_details": {"cached_tokens": 8},
+                "output_tokens": 1647,
+                "output_tokens_details": {"reasoning_tokens": 1273},
+            },
+            id="missing-field",
+        ),
+        pytest.param(
+            {
+                "input_tokens": -1,
+                "input_tokens_details": {"cached_tokens": 0},
+                "output_tokens": 1647,
+                "output_tokens_details": {"reasoning_tokens": 1273},
+                "total_tokens": 1646,
+            },
+            id="negative-field",
+        ),
+        pytest.param(
+            {
+                **RESPONSES_USAGE,
+                "output_tokens_details": {"reasoning_tokens": 1648},
+            },
+            id="reasoning-exceeds-output",
+        ),
+        pytest.param(
+            {**RESPONSES_USAGE, "total_tokens": 1706},
+            id="total-mismatch",
+        ),
+    ],
+)
+def test_malformed_token_values_are_preserved_and_marked_invalid(
+    raw_usage: dict[str, object],
+) -> None:
+    call = normalize_provider_call(
+        protocol="responses",
+        sequence=1,
+        purpose="inspection",
+        status="succeeded",
+        raw_usage=raw_usage,
+    )
+
+    assert call.usage_available is False
+    assert call.usage_error == "invalid_usage"
+    assert call.raw_usage == raw_usage
+
+
 def test_call_shape_and_token_relationships_are_enforced() -> None:
     with pytest.raises(ValidationError):
         TokenValues(
@@ -190,7 +241,7 @@ def test_call_shape_and_token_relationships_are_enforced() -> None:
         )
 
 
-def test_invalid_versioned_payload_is_treated_as_untracked() -> None:
+def test_non_null_invalid_payload_is_unavailable_not_untracked() -> None:
     collector = AttemptUsageCollector("responses")
     collector.add_missing("inspection")
     payload = collector.snapshot().model_dump(mode="json")
@@ -198,5 +249,82 @@ def test_invalid_versioned_payload_is_treated_as_untracked() -> None:
 
     assert parse_attempt_trace(payload) is None
     summary = summarize_attempt_payloads([payload])
-    assert summary.availability is UsageAvailability.UNTRACKED
+    assert summary.availability is UsageAvailability.UNAVAILABLE
     assert summary.unknown_call_count == 1
+
+
+def test_non_null_malformed_payload_is_unavailable_not_untracked() -> None:
+    summary = summarize_attempt_payloads([{"schema_version": 1}])
+
+    assert summary.availability is UsageAvailability.UNAVAILABLE
+    assert summary.known_call_count == 0
+    assert summary.unknown_call_count == 1
+
+
+def test_known_and_invalid_payloads_are_partial() -> None:
+    collector = AttemptUsageCollector("responses")
+    collector.add_response("inspection", RESPONSES_USAGE)
+    known_payload = collector.snapshot().model_dump(mode="json")
+
+    summary = summarize_attempt_payloads([known_payload, {"schema_version": 2}])
+
+    assert summary.availability is UsageAvailability.PARTIAL
+    assert summary.known_call_count == 1
+    assert summary.unknown_call_count == 1
+    assert summary.total_tokens == 1705
+
+
+def test_valid_empty_trace_is_not_started() -> None:
+    payload = AttemptUsageCollector("responses").snapshot().model_dump(mode="json")
+
+    summary = summarize_attempt_payloads([payload])
+
+    assert summary.availability is UsageAvailability.NOT_STARTED
+    assert summary.known_call_count == 0
+    assert summary.unknown_call_count == 0
+
+
+def test_complete_and_unavailable_summaries_are_distinct() -> None:
+    complete_collector = AttemptUsageCollector("responses")
+    complete_collector.add_response("inspection", RESPONSES_USAGE)
+    unavailable_collector = AttemptUsageCollector("responses")
+    unavailable_collector.add_missing("inspection")
+
+    complete = summarize_attempt_payloads(
+        [complete_collector.snapshot().model_dump(mode="json")]
+    )
+    unavailable = summarize_attempt_payloads(
+        [unavailable_collector.snapshot().model_dump(mode="json")]
+    )
+
+    assert complete.availability is UsageAvailability.COMPLETE
+    assert complete.known_call_count == 1
+    assert complete.unknown_call_count == 0
+    assert unavailable.availability is UsageAvailability.UNAVAILABLE
+    assert unavailable.known_call_count == 0
+    assert unavailable.unknown_call_count == 1
+
+
+def test_attempt_trace_rejects_totals_that_do_not_match_calls() -> None:
+    collector = AttemptUsageCollector("responses")
+    collector.add_response("inspection", RESPONSES_USAGE)
+    payload = collector.snapshot().model_dump(mode="json")
+    payload["totals"]["total_tokens"] = 1706
+
+    with pytest.raises(ValidationError):
+        AttemptUsageTrace.model_validate(payload)
+    assert parse_attempt_trace(payload) is None
+
+
+def test_raw_usage_must_be_json_safe_when_models_are_parsed_directly() -> None:
+    collector = AttemptUsageCollector("responses")
+    collector.add_response("inspection", RESPONSES_USAGE)
+    call_payload = collector.snapshot().calls[0].model_dump(mode="json")
+    call_payload["raw_usage"] = {"unsupported": {1, 2}}
+
+    with pytest.raises(ValidationError):
+        TokenUsageCall.model_validate(call_payload)
+
+    trace_payload = collector.snapshot().model_dump(mode="json")
+    trace_payload["calls"][0]["raw_usage"] = {"unsupported": {1, 2}}
+    assert parse_attempt_trace(trace_payload) is None

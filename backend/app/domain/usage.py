@@ -3,7 +3,14 @@ from collections.abc import Mapping, Sequence
 from enum import StrEnum
 from typing import Any, Literal, Self, cast
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 ProtocolName = Literal["responses", "chat"]
 CallPurpose = Literal["inspection", "schema_fallback", "json_repair"]
@@ -54,6 +61,16 @@ class TokenUsageCall(BaseModel):
     total_tokens: int | None
     raw_usage: dict[str, Any] | None
 
+    @field_validator("raw_usage", mode="before")
+    @classmethod
+    def validate_raw_usage(cls, value: Any) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        try:
+            return _mapping(value)
+        except Exception as error:
+            raise ValueError("raw usage must be a JSON-safe object") from error
+
     @model_validator(mode="after")
     def validate_shape(self) -> Self:
         values = (
@@ -97,6 +114,12 @@ class AttemptUsageTrace(BaseModel):
     protocol: ProtocolName
     calls: list[TokenUsageCall]
     totals: TokenUsageTotals
+
+    @model_validator(mode="after")
+    def validate_totals(self) -> Self:
+        if self.totals != _sum_calls(self.calls):
+            raise ValueError("usage totals do not match calls")
+        return self
 
     @classmethod
     def from_calls(
@@ -296,15 +319,25 @@ def summarize_attempt_payloads(payloads: Sequence[Any]) -> TokenUsageSummary:
         totals = _sum_calls([])
     else:
         traces = [parse_attempt_trace(payload) for payload in payloads]
-        untracked_attempts = sum(trace is None for trace in traces)
+        legacy_attempts = sum(payload is None for payload in payloads)
+        invalid_attempts = sum(
+            payload is not None and trace is None
+            for payload, trace in zip(payloads, traces, strict=True)
+        )
         calls = [call for trace in traces if trace is not None for call in trace.calls]
         call_totals = _sum_calls(calls)
         totals = call_totals.model_copy(
-            update={"unknown_call_count": call_totals.unknown_call_count + untracked_attempts}
+            update={
+                "unknown_call_count": (
+                    call_totals.unknown_call_count + legacy_attempts + invalid_attempts
+                )
+            }
         )
 
-        if untracked_attempts == len(payloads):
+        if legacy_attempts == len(payloads):
             availability = UsageAvailability.UNTRACKED
+        elif not calls and legacy_attempts == 0 and invalid_attempts == 0:
+            availability = UsageAvailability.NOT_STARTED
         elif totals.known_call_count == 0:
             availability = UsageAvailability.UNAVAILABLE
         elif totals.unknown_call_count > 0:
