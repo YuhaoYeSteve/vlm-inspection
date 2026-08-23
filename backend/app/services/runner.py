@@ -226,7 +226,10 @@ class TaskRunner:
         config, system_prompt, user_prompt = self._inspection_context(task_id, image)
         policy = RetryPolicy(config.max_retries)
         retry_index = 0
+        attempt_number = image.attempt_count
         while True:
+            if retry_index > 0:
+                attempt_number = self._reserve_retry_attempt(image.id)
             started = time.monotonic()
             try:
                 outcome = self.inspector.inspect(
@@ -239,6 +242,7 @@ class TaskRunner:
                 self._record_attempt(
                     image.id,
                     status="failed",
+                    attempt_number=attempt_number,
                     status_code=exc.status_code,
                     error_code=exc.code or "ark_request_failed",
                     duration_ms=self._duration_ms(started),
@@ -266,6 +270,7 @@ class TaskRunner:
                 self._record_attempt(
                     image.id,
                     status="failed",
+                    attempt_number=attempt_number,
                     error_code="invalid_model_output",
                     duration_ms=self._duration_ms(started),
                     usage=(
@@ -278,6 +283,7 @@ class TaskRunner:
             self._record_attempt(
                 image.id,
                 status="succeeded",
+                attempt_number=attempt_number,
                 duration_ms=self._duration_ms(started),
                 usage=outcome.usage.model_dump(mode="json"),
             )
@@ -307,6 +313,7 @@ class TaskRunner:
         self,
         image_id: str,
         status: str,
+        attempt_number: int,
         duration_ms: int,
         status_code: int | None = None,
         error_code: str | None = None,
@@ -316,12 +323,19 @@ class TaskRunner:
             TaskRepository(session).record_attempt(
                 image_id,
                 status=status,
+                attempt_number=attempt_number,
                 status_code=status_code,
                 error_code=error_code,
                 duration_ms=duration_ms,
                 usage=usage,
             )
             session.commit()
+
+    def _reserve_retry_attempt(self, image_id: str) -> int:
+        with self.sessions() as session:
+            attempt_number = TaskRepository(session).reserve_retry_attempt(image_id)
+            session.commit()
+            return attempt_number
 
     def _save_success(self, image_id: str, result: InspectionResult) -> None:
         with self.sessions() as session:

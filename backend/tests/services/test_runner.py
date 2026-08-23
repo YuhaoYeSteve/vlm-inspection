@@ -139,6 +139,14 @@ class TaskFixture:
                 )
             )
 
+    def image_attempt_count(self) -> int:
+        with self.sessions() as session:  # type: ignore[operator]
+            attempt_count = session.scalar(
+                select(TaskImage.attempt_count).where(TaskImage.task_id == self.task_id)
+            )
+            assert attempt_count is not None
+            return attempt_count
+
 
 def make_task_fixture(
     tmp_path: Path,
@@ -257,6 +265,8 @@ async def test_runner_retries_429_twice_then_succeeds(tmp_path) -> None:
 
     assert inspector.call_count == 3
     assert fixture.attempt_count() == 3
+    assert [attempt.attempt_number for attempt in fixture.attempts()] == [1, 2, 3]
+    assert fixture.image_attempt_count() == 3
     assert fixture.count_images(ImageStatus.SUCCEEDED) == 1
 
 

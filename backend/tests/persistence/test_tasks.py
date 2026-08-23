@@ -62,6 +62,7 @@ def test_claim_result_attempt_and_export_are_transactional(tmp_path) -> None:
         attempt = repo.record_attempt(
             first.id,
             status="succeeded",
+            attempt_number=claimed.attempt_count,
             status_code=200,
             duration_ms=12,
             usage=usage.snapshot().model_dump(mode="json"),
@@ -99,3 +100,34 @@ def test_claim_result_attempt_and_export_are_transactional(tmp_path) -> None:
             )
             == 1
         )
+
+
+def test_reserved_retry_numbers_survive_interleaved_recording(tmp_path) -> None:
+    engine = make_engine(tmp_path / "retry-reservations.db")
+    Base.metadata.create_all(engine)
+    sessions = make_session_factory(engine)
+
+    with sessions() as session:
+        repo = TaskRepository(session)
+        task = repo.create_task("retry numbering", {"template_version": 1}, {"model": "seed"})
+        image = repo.add_image(task.id, 0, "a.png", "aaa", "a.png", "a.jpg", "at.jpg")
+        claimed = repo.claim_next_image(task.id)
+        assert claimed is not None
+        first_retry = repo.reserve_retry_attempt(image.id)
+        second_retry = repo.reserve_retry_attempt(image.id)
+
+        first_record = repo.record_attempt(
+            image.id,
+            status="failed",
+            attempt_number=first_retry,
+        )
+        second_record = repo.record_attempt(
+            image.id,
+            status="succeeded",
+            attempt_number=second_retry,
+        )
+        session.commit()
+
+        assert [first_retry, second_retry] == [2, 3]
+        assert [first_record.attempt_number, second_record.attempt_number] == [2, 3]
+        assert repo.get_image(image.id).attempt_count == 3

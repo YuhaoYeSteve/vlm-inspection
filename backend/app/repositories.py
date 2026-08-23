@@ -238,6 +238,17 @@ class TaskRepository:
         self.session.flush()
         return image
 
+    def reserve_retry_attempt(self, image_id: str) -> int:
+        attempt_number = self.session.scalar(
+            update(TaskImage)
+            .where(TaskImage.id == image_id)
+            .values(attempt_count=TaskImage.attempt_count + 1)
+            .returning(TaskImage.attempt_count)
+        )
+        if attempt_number is None:
+            raise LookupError(image_id)
+        return attempt_number
+
     def save_result(
         self,
         image_id: str,
@@ -269,15 +280,16 @@ class TaskRepository:
         self,
         image_id: str,
         status: str,
+        attempt_number: int,
         status_code: int | None = None,
         error_code: str | None = None,
         duration_ms: int | None = None,
         usage: dict[str, Any] | None = None,
     ) -> InferenceAttempt:
-        image = self.get_image(image_id)
+        self.get_image(image_id)
         attempt = InferenceAttempt(
             image_id=image_id,
-            attempt_number=image.attempt_count,
+            attempt_number=attempt_number,
             status=status,
             status_code=status_code,
             error_code=error_code,
