@@ -189,7 +189,7 @@ def render_report_document(
     ]
     images = tuple(
         DocumentImagePlacement(
-            operation_key=f"doc-image:{item.image_id}",
+            operation_key=f"doc-image-bound:{item.image_id}",
             image_id=item.image_id,
             path=item.image_path,
             filename=item.filename,

@@ -188,6 +188,15 @@ class FakeReportFeishuClient:
         self.calls.append(f"upload_image:{block_id}")
         return f"token-{block_id}"
 
+    async def bind_docx_image(
+        self,
+        document_id: str,
+        block_id: str,
+        file_token: str,
+    ) -> None:
+        del document_id, file_token
+        self.calls.append(f"bind_image:{block_id}")
+
     async def move_document_block(
         self,
         document_id: str,

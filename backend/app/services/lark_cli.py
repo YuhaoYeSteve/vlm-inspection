@@ -338,6 +338,36 @@ class LarkCliFeishuClient:
             raise LarkCliCommandError("lark_cli_invalid_response")
         return token
 
+    async def bind_docx_image(
+        self,
+        document_id: str,
+        block_id: str,
+        file_token: str,
+    ) -> None:
+        data = await self._api(
+            "PATCH",
+            f"/open-apis/docx/v1/documents/{document_id}/blocks/batch_update",
+            params={"document_revision_id": "-1"},
+            body={
+                "requests": [
+                    {
+                        "block_id": block_id,
+                        "replace_image": {"token": file_token},
+                    }
+                ]
+            },
+        )
+        raw_blocks = data.get("blocks")
+        if not isinstance(raw_blocks, list):
+            raise LarkCliCommandError("lark_cli_invalid_response")
+        for raw_block in raw_blocks:
+            if not isinstance(raw_block, dict) or raw_block.get("block_id") != block_id:
+                continue
+            image = raw_block.get("image")
+            if isinstance(image, dict) and image.get("token") == file_token:
+                return
+        raise LarkCliCommandError("lark_cli_invalid_response")
+
     async def move_document_block(
         self,
         document_id: str,

@@ -262,6 +262,13 @@ class ReportBuilder:
             for placement in placements
             if not self._operation_completed(export.id, placement.operation_key)
         ]
+        positioned = {
+            placement.image_id: self._operation_completed(
+                export.id,
+                f"doc-image:{placement.image_id}",
+            )
+            for placement in pending
+        }
         block_ids: dict[str, str] = {}
         for placement in pending:
             block_key = f"doc-image-block:{placement.image_id}"
@@ -277,22 +284,35 @@ class ReportBuilder:
             block_ids[placement.image_id] = block_id
 
         semaphore = asyncio.Semaphore(self.image_upload_concurrency)
+        document_lock = asyncio.Lock()
         ledger_lock = asyncio.Lock()
 
         async def upload(placement: DocumentImagePlacement) -> None:
             async with semaphore:
                 block_id = block_ids[placement.image_id]
-                await self.feishu.upload_docx_image(
+                file_token = await self.feishu.upload_docx_image(
                     block_id,
                     placement.filename,
                     placement.path.read_bytes(),
                 )
-                await self.feishu.move_document_block(
+            async with document_lock:
+                await self.feishu.bind_docx_image(
                     document_id,
-                    image_anchors[placement.image_id],
                     block_id,
+                    file_token,
                 )
+                if not positioned[placement.image_id]:
+                    await self.feishu.move_document_block(
+                        document_id,
+                        image_anchors[placement.image_id],
+                        block_id,
+                    )
             async with ledger_lock:
+                if not positioned[placement.image_id]:
+                    self._mark_operation_completed(
+                        export.id,
+                        f"doc-image:{placement.image_id}",
+                    )
                 self._mark_operation_completed(export.id, placement.operation_key)
 
         results = await asyncio.gather(

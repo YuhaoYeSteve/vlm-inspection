@@ -108,6 +108,14 @@ class DeterministicFeishuClient:
         del filename, content
         return f"token-{block_id}"
 
+    async def bind_docx_image(
+        self,
+        document_id: str,
+        block_id: str,
+        file_token: str,
+    ) -> None:
+        del document_id, block_id, file_token
+
     async def move_document_block(
         self,
         document_id: str,

@@ -288,7 +288,7 @@ async def test_report_client_appends_and_fetches_document_xml() -> None:
 
 
 @pytest.mark.asyncio
-async def test_report_client_creates_uploads_and_moves_image_to_table_cell() -> None:
+async def test_report_client_creates_uploads_binds_and_moves_image_to_table_cell() -> None:
     runner = QueueRunner(
         [
             {
@@ -300,6 +300,20 @@ async def test_report_client_creates_uploads_and_moves_image_to_table_cell() -> 
                 "ok": True,
                 "identity": "user",
                 "data": {"file_token": "file-token-1"},
+            },
+            {
+                "ok": True,
+                "identity": "user",
+                "data": {
+                    "blocks": [
+                        {
+                            "block_id": "image-block-1",
+                            "block_type": 27,
+                            "image": {"token": "file-token-1"},
+                        }
+                    ],
+                    "document_revision_id": 3,
+                },
             },
             {
                 "ok": True,
@@ -316,6 +330,7 @@ async def test_report_client_creates_uploads_and_moves_image_to_table_cell() -> 
         "doc-image-block:image-1",
     )
     token = await client.upload_docx_image(block.id, "原图.jpg", b"jpeg")
+    await client.bind_docx_image("document-1", block.id, token)
     await client.move_document_block("document-1", "anchor-b", block.id)
 
     assert block == BlockRef("image-block-1")
@@ -351,7 +366,28 @@ async def test_report_client_creates_uploads_and_moves_image_to_table_cell() -> 
     }
     assert upload_call["stdin"] == b"jpeg"
     assert upload_call["timeout"] == 90
-    assert runner.calls[2]["args"] == [
+    bind_call = runner.calls[2]
+    assert bind_call["args"][:3] == [
+        "api",
+        "PATCH",
+        "/open-apis/docx/v1/documents/document-1/blocks/batch_update",
+    ]
+    bind_params = json.loads(
+        bind_call["args"][bind_call["args"].index("--params") + 1]
+    )
+    assert bind_params == {"document_revision_id": "-1"}
+    bind_body = json.loads(
+        bind_call["args"][bind_call["args"].index("--data") + 1]
+    )
+    assert bind_body == {
+        "requests": [
+            {
+                "block_id": "image-block-1",
+                "replace_image": {"token": "file-token-1"},
+            }
+        ]
+    }
+    assert runner.calls[3]["args"] == [
         "docs",
         "+update",
         "--doc",

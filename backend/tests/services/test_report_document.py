@@ -89,7 +89,7 @@ def test_render_report_document_groups_images_and_results() -> None:
         f"image-{index}" for index in range(1, 13)
     ]
     assert [placement.operation_key for placement in layout.images] == [
-        f"doc-image:image-{index}" for index in range(1, 13)
+        f"doc-image-bound:image-{index}" for index in range(1, 13)
     ]
 
 

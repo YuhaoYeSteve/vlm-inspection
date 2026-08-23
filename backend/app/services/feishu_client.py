@@ -44,6 +44,13 @@ class FeishuClientProtocol(Protocol):
         content: bytes,
     ) -> str: ...
 
+    async def bind_docx_image(
+        self,
+        document_id: str,
+        block_id: str,
+        file_token: str,
+    ) -> None: ...
+
     async def move_document_block(
         self,
         document_id: str,

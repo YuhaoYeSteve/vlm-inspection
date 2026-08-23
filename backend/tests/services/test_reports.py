@@ -30,15 +30,22 @@ class FakeFeishuClient:
         self.image_parent_ids: list[str] = []
         self.move_calls: list[tuple[str, str]] = []
         self.image_calls: list[ImageCall] = []
+        self.bind_calls: list[tuple[str, str, str]] = []
         self.block_attempts: Counter[str] = Counter()
         self.upload_attempts: Counter[str] = Counter()
+        self.bind_attempts: Counter[str] = Counter()
         self.fail_blocks: set[str] = set()
+        self.fail_bind_blocks: set[str] = set()
         self.delay = 0.0
+        self.bind_delay = 0.0
         self.block_delay = 0.0
         self.active_uploads = 0
         self.max_active_uploads = 0
+        self.active_bindings = 0
+        self.max_active_bindings = 0
         self.active_block_creates = 0
         self.max_active_block_creates = 0
+        self.reject_concurrent_bindings = False
         self.reject_concurrent_block_creates = False
 
     async def create_document(
@@ -121,6 +128,30 @@ class FakeFeishuClient:
             return f"token-{block_id}"
         finally:
             self.active_uploads -= 1
+
+    async def bind_docx_image(
+        self,
+        document_id: str,
+        block_id: str,
+        file_token: str,
+    ) -> None:
+        assert document_id.startswith("document-")
+        self.bind_attempts[block_id] += 1
+        self.active_bindings += 1
+        self.max_active_bindings = max(
+            self.max_active_bindings,
+            self.active_bindings,
+        )
+        try:
+            if self.bind_delay:
+                await asyncio.sleep(self.bind_delay)
+            if self.reject_concurrent_bindings and self.active_bindings > 1:
+                raise RuntimeError("concurrent document image binding")
+            if block_id in self.fail_bind_blocks:
+                raise RuntimeError("injected document image binding failure")
+            self.bind_calls.append((document_id, block_id, file_token))
+        finally:
+            self.active_bindings -= 1
 
     async def move_document_block(
         self,
@@ -255,9 +286,13 @@ async def test_report_creates_docx_table_and_places_matching_images(report_fixtu
     assert exported.document_id == "document-1"
     assert exported.document_url == "https://example.feishu.cn/docx/document-1"
     assert exported.completed_operations_json[0] == "doc:layout"
-    assert set(exported.completed_operations_json[1:]) == {
-        f"doc-image:{item.image_id}"
+    image_ids = {
+        item.image_id
         for item in report_fixture.builder.project(report_fixture.task_id).items
+    }
+    assert set(exported.completed_operations_json[1:]) == {
+        *(f"doc-image:{image_id}" for image_id in image_ids),
+        *(f"doc-image-bound:{image_id}" for image_id in image_ids),
     }
     assert report_fixture.feishu.created_documents == 1
     assert len(report_fixture.feishu.appended_xml) == 1
@@ -278,6 +313,13 @@ async def test_report_creates_docx_table_and_places_matching_images(report_fixtu
     }
     assert {call.block_id for call in report_fixture.feishu.image_calls} == {
         f"image-{item.image_id}"
+        for item in report_fixture.builder.project(report_fixture.task_id).items
+    }
+    assert {
+        (block_id, token)
+        for _document_id, block_id, token in report_fixture.feishu.bind_calls
+    } == {
+        (f"image-{item.image_id}", f"token-image-{item.image_id}")
         for item in report_fixture.builder.project(report_fixture.task_id).items
     }
     assert all(call.content.startswith(b"thumbnail-") for call in report_fixture.feishu.image_calls)
@@ -334,6 +376,82 @@ async def test_retry_reuses_document_blocks_and_skips_completed_images(report_fi
 
 
 @pytest.mark.asyncio
+async def test_retry_reuses_block_and_reuploads_when_image_binding_fails(
+    report_fixture,
+) -> None:
+    image_ids = [
+        item.image_id
+        for item in report_fixture.builder.project(report_fixture.task_id).items
+    ]
+    failed_block = f"image-{image_ids[1]}"
+    report_fixture.feishu.fail_bind_blocks.add(failed_block)
+
+    first = await report_fixture.builder.export(report_fixture.task_id)
+    with report_fixture.sessions() as session:  # type: ignore[operator]
+        completed = set(
+            TaskRepository(session)
+            .get_or_create_active_export(report_fixture.task_id)
+            .completed_operations_json
+        )
+    report_fixture.feishu.fail_bind_blocks.clear()
+    second = await report_fixture.builder.export(report_fixture.task_id)
+
+    assert first.status == "failed"
+    assert f"doc-image-bound:{image_ids[1]}" not in completed
+    assert second.status == "succeeded"
+    assert set(report_fixture.feishu.block_attempts.values()) == {1}
+    assert report_fixture.feishu.upload_attempts == Counter(
+        {
+            failed_block: 2,
+            f"image-{image_ids[0]}": 1,
+            f"image-{image_ids[2]}": 1,
+        }
+    )
+    assert report_fixture.feishu.bind_attempts == report_fixture.feishu.upload_attempts
+
+
+@pytest.mark.asyncio
+async def test_legacy_completed_images_are_bound_without_redundant_move(
+    report_fixture,
+) -> None:
+    image_ids = [
+        item.image_id
+        for item in report_fixture.builder.project(report_fixture.task_id).items
+    ]
+    with report_fixture.sessions() as session:  # type: ignore[operator]
+        export = TaskRepository(session).get_or_create_active_export(
+            report_fixture.task_id
+        )
+        export.status = "succeeded"
+        export.document_id = "document-existing"
+        export.document_url = "https://example.feishu.cn/docx/document-existing"
+        export.completed_operations_json = [
+            "doc:layout",
+            *(f"doc-image:{image_id}" for image_id in image_ids),
+        ]
+        export.remote_blocks_json = {
+            **{
+                f"doc-cell:{image_id}": f"anchor-{index}"
+                for index, image_id in enumerate(image_ids)
+            },
+            **{
+                f"doc-image-block:{image_id}": f"image-{image_id}"
+                for image_id in image_ids
+            },
+        }
+        session.commit()
+
+    exported = await report_fixture.builder.export(report_fixture.task_id)
+
+    assert exported.status == "succeeded"
+    assert report_fixture.feishu.block_attempts == Counter()
+    assert report_fixture.feishu.move_calls == []
+    assert set(exported.completed_operations_json) >= {
+        f"doc-image-bound:{image_id}" for image_id in image_ids
+    }
+
+
+@pytest.mark.asyncio
 async def test_document_image_uploads_use_bounded_concurrency(report_fixture) -> None:
     report_fixture.feishu.delay = 0.01
 
@@ -341,6 +459,17 @@ async def test_document_image_uploads_use_bounded_concurrency(report_fixture) ->
 
     assert exported.status == "succeeded"
     assert 1 < report_fixture.feishu.max_active_uploads <= 4
+
+
+@pytest.mark.asyncio
+async def test_document_image_bindings_are_serialized(report_fixture) -> None:
+    report_fixture.feishu.bind_delay = 0.01
+    report_fixture.feishu.reject_concurrent_bindings = True
+
+    exported = await report_fixture.builder.export(report_fixture.task_id)
+
+    assert exported.status == "succeeded"
+    assert report_fixture.feishu.max_active_bindings == 1
 
 
 @pytest.mark.asyncio
