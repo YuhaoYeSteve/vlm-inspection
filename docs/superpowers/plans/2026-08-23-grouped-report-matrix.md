@@ -1,5 +1,7 @@
 # Grouped Inspection Report Matrix Implementation Plan
 
+> Superseded by the approved native-spreadsheet design in `../specs/2026-08-23-dynamic-spreadsheet-report-design.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a native two-row Feishu Docx matrix with merged department headers and per-image verdicts, then generate a new version of the existing report without rerunning inference.

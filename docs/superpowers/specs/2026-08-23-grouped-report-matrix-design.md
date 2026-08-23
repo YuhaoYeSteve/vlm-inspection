@@ -1,5 +1,7 @@
 # Grouped Inspection Report Matrix Design
 
+> Superseded by `2026-08-23-dynamic-spreadsheet-report-design.md`. The corrected requirement is a native Feishu spreadsheet whose first data row contains images and whose second data row contains the corresponding results.
+
 ## Context
 
 The current Feishu report presents a summary followed by one detailed section per image. The source spreadsheet arranges the inspected photos horizontally and groups adjacent photos under department headings. Readers need the generated report to preserve that visual reading pattern without exposing source cell coordinates or requiring the source spreadsheet to remain available.
