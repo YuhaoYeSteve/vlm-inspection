@@ -17,6 +17,28 @@ RESULT_COLORS = {
     "unverifiable": "yellow",
     "failed": "red",
 }
+VERDICT_LABELS = {
+    "pass": "合格",
+    "fail": "不合格",
+    "unverifiable": "无法判断",
+    "failed": "执行失败",
+}
+FINDING_STATUS_LABELS = {
+    "pass": "合格",
+    "fail": "不合格",
+    "not_visible": "未清晰入镜",
+}
+EXECUTION_STATUS_LABELS = {
+    "failed": "执行失败",
+}
+
+
+@dataclass(frozen=True)
+class DocumentFinding:
+    rule_name: str
+    status: str
+    observation: str
+    visual_evidence: str
 
 
 @dataclass(frozen=True)
@@ -26,8 +48,10 @@ class DocumentItem:
     image_path: Path
     verdict: str
     summary: str
+    image_valid: bool | None
     unverifiable_reason: str | None
     execution_status: str
+    findings: tuple[DocumentFinding, ...]
 
 
 @dataclass(frozen=True)
@@ -108,15 +132,17 @@ def _token_usage_text(token_usage: TokenUsageSummary) -> str:
 
 
 def _result_parts(item: DocumentItem) -> tuple[str, str]:
+    try:
+        label = VERDICT_LABELS[item.verdict]
+    except KeyError as exc:
+        raise ValueError(f"unsupported verdict: {item.verdict}") from exc
     if item.verdict == "pass":
-        return "合格", ""
+        return label, ""
     if item.verdict == "fail":
-        return "不合格", item.summary.strip()
+        return label, item.summary.strip()
     if item.verdict == "unverifiable":
-        return "无法判断", (item.unverifiable_reason or item.summary).strip()
-    if item.verdict == "failed":
-        return "执行失败", item.execution_status.strip()
-    raise ValueError(f"unsupported verdict: {item.verdict}")
+        return label, (item.unverifiable_reason or item.summary).strip()
+    return label, item.execution_status.strip()
 
 
 def _result_cell(item: DocumentItem) -> str:
@@ -127,6 +153,49 @@ def _result_cell(item: DocumentItem) -> str:
         f'<b><span text-color="{RESULT_COLORS[item.verdict]}">'
         f"{label}{detail_xml}</span></b></p></td>"
     )
+
+
+def _model_output_cell(item: DocumentItem) -> str:
+    if item.image_valid is None:
+        status = EXECUTION_STATUS_LABELS.get(
+            item.execution_status,
+            item.execution_status,
+        )
+        return (
+            '<td vertical-align="top"><p><b>无模型输出</b></p>'
+            f"<p><b>执行状态：</b>{html.escape(status)}</p></td>"
+        )
+
+    verdict = VERDICT_LABELS.get(item.verdict, item.verdict)
+    parts = [
+        f"<p><b>图片有效性：</b>{'有效' if item.image_valid else '无效'}</p>",
+        f"<p><b>总体结论：</b>{html.escape(verdict)}</p>",
+        f"<p><b>总结：</b>{html.escape(item.summary)}</p>",
+    ]
+    if item.unverifiable_reason:
+        parts.append(
+            "<p><b>不可判断原因：</b>"
+            f"{html.escape(item.unverifiable_reason)}</p>"
+        )
+    if not item.findings:
+        parts.append("<p><b>检查项：</b>无</p>")
+    for index, finding in enumerate(item.findings, start=1):
+        status = FINDING_STATUS_LABELS.get(finding.status, finding.status)
+        parts.extend(
+            (
+                (
+                    "<p><b>"
+                    f"检查项 {index}：{html.escape(finding.rule_name)}｜"
+                    f"{html.escape(status)}</b></p>"
+                ),
+                f"<p><b>观察：</b>{html.escape(finding.observation)}</p>",
+                (
+                    "<p><b>视觉证据：</b>"
+                    f"{html.escape(finding.visual_evidence)}</p>"
+                ),
+            )
+        )
+    return f'<td vertical-align="top">{"".join(parts)}</td>'
 
 
 def _render_band(items: tuple[DocumentItem, ...]) -> str:
@@ -142,9 +211,10 @@ def _render_band(items: tuple[DocumentItem, ...]) -> str:
         '<td vertical-align="middle"><p></p></td>' for _item in items
     )
     result_cells = "".join(_result_cell(item) for item in items)
+    model_output_cells = "".join(_model_output_cell(item) for item in items)
     return (
         "<table>"
-        f'<colgroup><col width="110"/><col span="{len(items)}" width="105"/></colgroup>'
+        f'<colgroup><col width="110"/><col span="{len(items)}" width="240"/></colgroup>'
         "<thead><tr>"
         '<th background-color="light-gray" vertical-align="middle">'
         '<p align="center"><b>巡检项</b></p></th>'
@@ -158,6 +228,10 @@ def _render_band(items: tuple[DocumentItem, ...]) -> str:
         '<td background-color="light-gray" vertical-align="middle">'
         '<p align="center"><b>巡检结果</b></p></td>'
         f"{result_cells}</tr>"
+        "<tr>"
+        '<td background-color="light-gray" vertical-align="middle">'
+        '<p align="center"><b>模型完整输出</b></p></td>'
+        f"{model_output_cells}</tr>"
         "</tbody></table>"
     )
 

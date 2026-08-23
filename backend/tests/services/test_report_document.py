@@ -4,6 +4,7 @@ import pytest
 
 from app.domain.usage import TokenUsageSummary, UsageAvailability
 from app.services.report_document import (
+    DocumentFinding,
     DocumentItem,
     parse_image_cell_ids,
     render_report_document,
@@ -16,8 +17,10 @@ def item(
     verdict: str,
     summary: str = "",
     *,
+    image_valid: bool | None = True,
     unverifiable_reason: str | None = None,
     execution_status: str = "succeeded",
+    findings: tuple[DocumentFinding, ...] = (),
 ) -> DocumentItem:
     return DocumentItem(
         image_id=f"image-{index}",
@@ -25,8 +28,10 @@ def item(
         image_path=Path(f"/images/{index}.jpg"),
         verdict=verdict,
         summary=summary,
+        image_valid=image_valid,
         unverifiable_reason=unverifiable_reason,
         execution_status=execution_status,
+        findings=findings,
     )
 
 
@@ -81,7 +86,8 @@ def test_render_report_document_groups_images_and_results() -> None:
     assert ">工程人员<" in layout.xml
     assert ">客房<" in layout.xml
     assert ">前厅<" in layout.xml
-    assert layout.xml.count(">合格<") == 10
+    assert layout.xml.count(">模型完整输出<") == 1
+    assert layout.xml.count(">合格<") == 20
     assert layout.xml.count(">不合格<br/>") == 2
     assert "问题-6" in layout.xml
     assert "问题-11" in layout.xml
@@ -94,13 +100,92 @@ def test_render_report_document_groups_images_and_results() -> None:
 
 
 def test_render_report_document_escapes_cell_text() -> None:
+    finding = DocumentFinding(
+        rule_name="工牌佩戴",
+        status="fail",
+        observation="左胸未见工牌 <需复核>",
+        visual_evidence="左胸区域清晰 & 无遮挡",
+    )
     layout = render_report_document(
-        (item(1, "普通图片.png", "fail", "工牌 < 缺失 & 待确认"),),
+        (
+            item(
+                1,
+                "普通图片.png",
+                "fail",
+                "工牌 < 缺失 & 待确认",
+                findings=(finding,),
+            ),
+        ),
         token_usage=complete_usage(),
     )
 
     assert "工牌 &lt; 缺失 &amp; 待确认" in layout.xml
+    assert "图片有效性：</b>有效" in layout.xml
+    assert "总体结论：</b>不合格" in layout.xml
+    assert "总结：</b>工牌 &lt; 缺失 &amp; 待确认" in layout.xml
+    assert "检查项 1：工牌佩戴｜不合格" in layout.xml
+    assert "观察：</b>左胸未见工牌 &lt;需复核&gt;" in layout.xml
+    assert "视觉证据：</b>左胸区域清晰 &amp; 无遮挡" in layout.xml
+    assert "schema_version" not in layout.xml
+    assert "rule_id" not in layout.xml
+    assert "confidence" not in layout.xml
     assert ">巡检图片<" in layout.xml
+
+
+def test_render_report_document_maps_unverifiable_fields() -> None:
+    finding = DocumentFinding(
+        rule_name="手部与指甲",
+        status="not_visible",
+        observation="手部未入镜",
+        visual_evidence="画面仅包含上半身",
+    )
+
+    layout = render_report_document(
+        (
+            item(
+                1,
+                "普通图片.png",
+                "unverifiable",
+                "关键区域不可见",
+                image_valid=False,
+                unverifiable_reason="图片被遮挡",
+                findings=(finding,),
+            ),
+        ),
+        token_usage=complete_usage(),
+    )
+
+    assert "图片有效性：</b>无效" in layout.xml
+    assert "总体结论：</b>无法判断" in layout.xml
+    assert "不可判断原因：</b>图片被遮挡" in layout.xml
+    assert "检查项 1：手部与指甲｜未清晰入镜" in layout.xml
+
+
+def test_render_report_document_shows_empty_findings() -> None:
+    layout = render_report_document(
+        (item(1, "普通图片.png", "pass", "检查完成"),),
+        token_usage=complete_usage(),
+    )
+
+    assert "检查项：</b>无" in layout.xml
+
+
+def test_render_report_document_shows_missing_model_output() -> None:
+    layout = render_report_document(
+        (
+            item(
+                1,
+                "普通图片.png",
+                "failed",
+                image_valid=None,
+                execution_status="failed",
+            ),
+        ),
+        token_usage=complete_usage(),
+    )
+
+    assert ">无模型输出<" in layout.xml
+    assert "执行状态：</b>执行失败" in layout.xml
 
 
 def test_render_report_document_starts_new_band_after_twelve_images() -> None:
@@ -113,6 +198,7 @@ def test_render_report_document_starts_new_band_after_twelve_images() -> None:
 
     assert layout.xml.count("<table>") == 3
     assert layout.xml.count(">巡检图片<") == 2
+    assert layout.xml.count(">模型完整输出<") == 2
     assert len(layout.images) == 13
 
 
