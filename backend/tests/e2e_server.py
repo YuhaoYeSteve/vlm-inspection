@@ -1,5 +1,6 @@
 import tempfile
 from pathlib import Path
+from typing import Any
 
 from app.core.config import Settings
 from app.core.db import Base, make_engine, make_session_factory
@@ -8,6 +9,7 @@ from app.main import create_app
 from app.repositories import SettingsRepository
 from app.services.ark import ArkRuntimeConfig, InspectionOutcome
 from app.services.feishu_client import SpreadsheetRef
+from app.services.lark_cli import FeishuConnection
 from tests.usage_fixtures import successful_usage
 
 
@@ -59,7 +61,7 @@ class DeterministicFeishuClient:
         title: str,
         folder_token: str,
         values: list[list[str]],
-        styles: dict,
+        styles: dict[str, Any],
     ) -> SpreadsheetRef:
         del title, folder_token, values, styles
         return SpreadsheetRef(
@@ -77,6 +79,22 @@ class DeterministicFeishuClient:
         filename: str,
     ) -> None:
         del spreadsheet_token, sheet_id, cell, image_path, filename
+
+
+class DeterministicFeishuConnectionProvider:
+    async def status(self) -> FeishuConnection:
+        return FeishuConnection(
+            configured=True,
+            connected=True,
+            user_name="E2E 用户",
+            app_name="E2E 应用",
+            identity="user",
+            token_status="valid",
+            expires_at=None,
+            destination_path="E2E 报告目录",
+            reference_url="https://example.feishu.cn/sheets/reference",
+            error_code=None,
+        )
 
 
 _runtime = tempfile.TemporaryDirectory(prefix="vlm-inspector-e2e-")
@@ -103,5 +121,6 @@ app = create_app(
     engine=_engine,
     secret_store=_secrets,
     inspection_service=DeterministicInspectionService(),
+    feishu_connection_provider=DeterministicFeishuConnectionProvider(),
     feishu_client=DeterministicFeishuClient(),
 )

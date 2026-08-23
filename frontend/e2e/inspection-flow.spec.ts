@@ -22,9 +22,10 @@ test("configures, runs three images, and opens the Feishu report", async ({ page
     "https://example.feishu.cn/sheets/report-1",
   );
   const taskUsage = page.getByRole("region", { name: "任务 Token 用量" });
-  await expect(taskUsage).toContainText("总 Token");
-  await expect(taskUsage).toContainText("36");
-  await expect(taskUsage).toContainText("缓存命中");
+  const totalMetric = taskUsage.getByText("总 Token", { exact: true }).locator("..");
+  await expect(totalMetric.getByText("36", { exact: true })).toBeVisible();
+  const cachedMetric = taskUsage.getByText("缓存命中", { exact: true }).locator("..");
+  await expect(cachedMetric.getByText("12", { exact: true })).toBeVisible();
   const browserStorage = await page.evaluate(() =>
     JSON.stringify({ localStorage: { ...localStorage }, sessionStorage: { ...sessionStorage } }),
   );
