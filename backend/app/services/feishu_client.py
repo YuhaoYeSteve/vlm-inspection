@@ -38,6 +38,13 @@ class FeishuClientProtocol(Protocol):
         operation_key: str,
     ) -> list[BlockRef]: ...
 
+    async def append_document_xml(
+        self,
+        document_id: str,
+        content: str,
+        operation_key: str,
+    ) -> None: ...
+
     async def create_image_block(
         self,
         document_id: str,
@@ -125,6 +132,28 @@ class FeishuClient:
             json={"children": blocks, "index": -1},
         )
         return [BlockRef(str(block["block_id"])) for block in payload["data"]["children"]]
+
+    async def append_document_xml(
+        self,
+        document_id: str,
+        content: str,
+        operation_key: str,
+    ) -> None:
+        del operation_key
+        await self._document_rate_limit.wait()
+        payload = await self._request(
+            "PUT",
+            f"/open-apis/docs_ai/v1/documents/{document_id}",
+            json={
+                "block_id": "-1",
+                "command": "block_insert_after",
+                "content": content,
+                "format": "xml",
+                "revision_id": -1,
+            },
+        )
+        if payload.get("data", {}).get("result") != "success":
+            raise FeishuApiError("document_update_failed")
 
     async def create_image_block(
         self,

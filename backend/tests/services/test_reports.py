@@ -275,6 +275,28 @@ def api_response(status: int, payload: dict, headers: dict[str, str] | None = No
 
 
 @pytest.mark.asyncio
+async def test_feishu_client_appends_document_xml() -> None:
+    oauth = FakeOAuth()
+    http = FakeRequestHttp(
+        [api_response(200, {"code": 0, "data": {"result": "success"}})]
+    )
+    client = FeishuClient(oauth, http=http, sleep=lambda _seconds: asyncio.sleep(0))
+
+    await client.append_document_xml("doc-1", "<table></table>", "matrix:1")
+
+    request = http.requests[0]
+    assert request["method"] == "PUT"
+    assert request["url"].endswith("/open-apis/docs_ai/v1/documents/doc-1")
+    assert request["json"] == {
+        "block_id": "-1",
+        "command": "block_insert_after",
+        "content": "<table></table>",
+        "format": "xml",
+        "revision_id": -1,
+    }
+
+
+@pytest.mark.asyncio
 async def test_feishu_client_retries_rate_limit_with_fresh_token() -> None:
     oauth = FakeOAuth()
     http = FakeRequestHttp(

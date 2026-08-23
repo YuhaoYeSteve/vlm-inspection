@@ -229,6 +229,37 @@ class LarkCliFeishuClient:
         )
         return [BlockRef(str(block["block_id"])) for block in data["children"]]
 
+    async def append_document_xml(
+        self,
+        document_id: str,
+        content: str,
+        operation_key: str,
+    ) -> None:
+        del operation_key
+        payload = await self.runner.run(
+            [
+                "docs",
+                "+update",
+                "--doc",
+                document_id,
+                "--command",
+                "append",
+                "--doc-format",
+                "xml",
+                "--content",
+                "-",
+                "--as",
+                "user",
+                "--format",
+                "json",
+            ],
+            stdin=content.encode("utf-8"),
+            timeout=60,
+        )
+        data = payload.get("data")
+        if not isinstance(data, dict) or data.get("result") != "success":
+            raise LarkCliCommandError("lark_cli_invalid_response")
+
     async def create_image_block(
         self,
         document_id: str,

@@ -228,6 +228,48 @@ async def test_report_client_uploads_image_bytes_through_stdin() -> None:
 
 
 @pytest.mark.asyncio
+async def test_report_client_appends_docx_xml_through_stdin() -> None:
+    runner = QueueRunner(
+        [{"ok": True, "identity": "user", "data": {"result": "success"}}]
+    )
+    client = LarkCliFeishuClient(runner)
+
+    await client.append_document_xml("doc-1", "<table></table>", "matrix:1")
+
+    call = runner.calls[0]
+    assert call["args"] == [
+        "docs",
+        "+update",
+        "--doc",
+        "doc-1",
+        "--command",
+        "append",
+        "--doc-format",
+        "xml",
+        "--content",
+        "-",
+        "--as",
+        "user",
+        "--format",
+        "json",
+    ]
+    assert call["stdin"] == b"<table></table>"
+
+
+@pytest.mark.asyncio
+async def test_report_client_rejects_unsuccessful_docx_xml_update() -> None:
+    runner = QueueRunner(
+        [{"ok": True, "identity": "user", "data": {"result": "failed"}}]
+    )
+    client = LarkCliFeishuClient(runner)
+
+    with pytest.raises(LarkCliCommandError) as raised:
+        await client.append_document_xml("doc-1", "<table></table>", "matrix:1")
+
+    assert raised.value.code == "lark_cli_invalid_response"
+
+
+@pytest.mark.asyncio
 async def test_report_client_rejects_failed_cli_envelope() -> None:
     runner = QueueRunner(
         [
