@@ -10,6 +10,7 @@ from app.services.lark_cli import (
     LarkCliCommandError,
     LarkCliCommandRunner,
     LarkCliConnectionProvider,
+    LarkCliFeishuClient,
 )
 
 
@@ -121,3 +122,82 @@ async def test_connection_provider_reports_missing_scope_without_throwing() -> N
 
     assert status.connected is False
     assert status.error_code == "feishu_scope_missing"
+
+
+@dataclass
+class QueueRunner:
+    payloads: list[dict[str, Any]]
+    calls: list[dict[str, Any]] = field(default_factory=list)
+
+    async def run(
+        self,
+        args: list[str],
+        *,
+        stdin: bytes | None = None,
+        cwd: Path | None = None,
+        timeout: float = 30,
+    ) -> dict[str, Any]:
+        self.calls.append({"args": args, "stdin": stdin, "cwd": cwd, "timeout": timeout})
+        return self.payloads.pop(0)
+
+
+@pytest.mark.asyncio
+async def test_report_client_creates_document_with_user_identity() -> None:
+    runner = QueueRunner(
+        [
+            {
+                "ok": True,
+                "identity": "user",
+                "data": {
+                    "document": {
+                        "document_id": "doc-1",
+                        "url": "https://example.feishu.cn/docx/doc-1",
+                    }
+                },
+            }
+        ]
+    )
+    client = LarkCliFeishuClient(runner)
+
+    document = await client.create_document("巡检报告", "folder-1", "export-1")
+
+    assert document.id == "doc-1"
+    call = runner.calls[0]["args"]
+    assert call[:4] == ["api", "POST", "/open-apis/docx/v1/documents", "--as"]
+    assert call[4] == "user"
+    assert any("folder-1" in argument for argument in call)
+
+
+@pytest.mark.asyncio
+async def test_report_client_uploads_image_bytes_through_stdin() -> None:
+    runner = QueueRunner(
+        [{"ok": True, "identity": "user", "data": {"file_token": "file-1"}}]
+    )
+    client = LarkCliFeishuClient(runner)
+
+    token = await client.upload_docx_image("block-1", "one.jpg", b"jpeg-bytes")
+
+    assert token == "file-1"
+    call = runner.calls[0]
+    assert call["stdin"] == b"jpeg-bytes"
+    assert "file=-" in call["args"]
+    assert any("docx_image" in argument for argument in call["args"])
+
+
+@pytest.mark.asyncio
+async def test_report_client_rejects_failed_cli_envelope() -> None:
+    runner = QueueRunner(
+        [
+            {
+                "ok": False,
+                "identity": "user",
+                "error": {"type": "authorization", "subtype": "missing_scope"},
+            }
+        ]
+    )
+    client = LarkCliFeishuClient(runner)
+
+    with pytest.raises(LarkCliCommandError) as raised:
+        await client.create_document("巡检报告", "folder-1", "export-1")
+
+    assert raised.value.code == "missing_scope"
