@@ -1,5 +1,5 @@
-import json
 import hashlib
+import json
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path

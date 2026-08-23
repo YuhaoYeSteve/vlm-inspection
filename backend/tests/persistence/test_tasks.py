@@ -6,7 +6,6 @@ from app.domain.usage import AttemptUsageCollector
 from app.models import InferenceAttempt, InferenceResultRecord
 from app.repositories import (
     REPORT_LAYOUT_OPERATION,
-    REPORT_WORKSHEET_ID_KEY,
     TaskRepository,
 )
 
@@ -212,7 +211,7 @@ def test_reserved_retry_numbers_survive_interleaved_recording(tmp_path) -> None:
         assert repo.get_image(image.id).attempt_count == 3
 
 
-def test_save_export_spreadsheet_persists_layout_checkpoint_atomically(tmp_path) -> None:
+def test_save_export_document_persists_block_and_layout_checkpoints(tmp_path) -> None:
     engine = make_engine(tmp_path / "report-sheet.db")
     Base.metadata.create_all(engine)
     sessions = make_session_factory(engine)
@@ -222,24 +221,20 @@ def test_save_export_spreadsheet_persists_layout_checkpoint_atomically(tmp_path)
         task = repo.create_task("report", {"template_version": 1}, {"model": "seed"})
         export = repo.get_or_create_active_export(task.id)
 
-        repo.save_export_spreadsheet(
+        repo.save_export_document(
             export.id,
-            "spreadsheet-token",
-            "https://example.feishu.cn/sheets/spreadsheet-token",
-            "worksheet-id",
+            "document-token",
+            "https://example.feishu.cn/docx/document-token",
         )
-        repo.save_export_spreadsheet(
-            export.id,
-            "spreadsheet-token",
-            "https://example.feishu.cn/sheets/spreadsheet-token",
-            "worksheet-id",
-        )
+        repo.save_remote_block(export.id, "doc-cell:image-1", "cell-1")
+        repo.mark_operation_completed(export.id, REPORT_LAYOUT_OPERATION)
+        repo.mark_operation_completed(export.id, REPORT_LAYOUT_OPERATION)
         session.commit()
         session.expire_all()
 
         reloaded = repo.get_export(export.id)
-        assert reloaded.document_id == "spreadsheet-token"
-        assert reloaded.document_url == "https://example.feishu.cn/sheets/spreadsheet-token"
-        assert reloaded.remote_blocks_json[REPORT_WORKSHEET_ID_KEY] == "worksheet-id"
+        assert reloaded.document_id == "document-token"
+        assert reloaded.document_url == "https://example.feishu.cn/docx/document-token"
+        assert reloaded.remote_blocks_json["doc-cell:image-1"] == "cell-1"
         assert reloaded.completed_operations_json == [REPORT_LAYOUT_OPERATION]
         assert reloaded.cursor == 1

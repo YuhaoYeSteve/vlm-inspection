@@ -14,7 +14,7 @@ from app.core.db import Base, make_engine
 from app.domain.results import Finding, FindingStatus, InspectionResult, Verdict
 from app.main import create_app
 from app.services.ark import ArkRuntimeConfig, InspectionOutcome
-from app.services.feishu_client import SpreadsheetRef
+from app.services.feishu_client import BlockRef, DocumentRef
 from app.services.lark_cli import FeishuConnection
 from tests.usage_fixtures import failed_usage, successful_usage
 
@@ -123,36 +123,70 @@ class FakeFeishuConnectionProvider:
 
 @dataclass
 class FakeReportFeishuClient:
-    created_spreadsheets: int = 0
+    created_documents: int = 0
     calls: list[str] = field(default_factory=list)
+    appended_xml: str = ""
 
-    async def create_spreadsheet(
+    async def create_document(
         self,
         title: str,
         folder_token: str,
-        values: list[list[str]],
-        styles: dict,
-    ) -> SpreadsheetRef:
-        del title, folder_token, values, styles
-        self.created_spreadsheets += 1
-        token = f"report-{self.created_spreadsheets}"
-        self.calls.append("create_spreadsheet")
-        return SpreadsheetRef(
+        client_token: str,
+    ) -> DocumentRef:
+        del title, folder_token, client_token
+        self.created_documents += 1
+        token = f"report-{self.created_documents}"
+        self.calls.append("create_document")
+        return DocumentRef(
             token,
-            f"https://example.feishu.cn/sheets/{token}",
-            f"worksheet-{self.created_spreadsheets}",
+            f"https://example.feishu.cn/docx/{token}",
         )
 
-    async def set_cell_image(
+    async def append_document_xml(
         self,
-        spreadsheet_token: str,
-        sheet_id: str,
-        cell: str,
-        image_path: Path,
-        filename: str,
+        document_id: str,
+        content: str,
+        operation_key: str,
     ) -> None:
-        del spreadsheet_token, sheet_id, image_path, filename
-        self.calls.append(f"image:{cell}")
+        del document_id, operation_key
+        self.appended_xml = content
+        self.calls.append("append_xml")
+
+    async def fetch_document_xml(self, document_id: str) -> str:
+        del document_id
+        image_count = self.appended_xml.count(
+            '<td vertical-align="middle"><p></p></td>'
+        )
+        cells = "".join(
+            f'<td id="cell-{index}"><p></p></td>'
+            for index in range(image_count)
+        )
+        return (
+            "<table><tbody>"
+            "<tr><td><p>巡检图片</p></td>"
+            f"{cells}</tr>"
+            "</tbody></table>"
+        )
+
+    async def create_image_block(
+        self,
+        document_id: str,
+        parent_block_id: str,
+        operation_key: str,
+    ) -> BlockRef:
+        del document_id, operation_key
+        self.calls.append(f"create_image:{parent_block_id}")
+        return BlockRef(f"image-{parent_block_id}")
+
+    async def upload_docx_image(
+        self,
+        block_id: str,
+        filename: str,
+        content: bytes,
+    ) -> str:
+        del filename, content
+        self.calls.append(f"upload_image:{block_id}")
+        return f"token-{block_id}"
 
 
 @pytest.fixture

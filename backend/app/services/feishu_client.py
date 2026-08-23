@@ -13,15 +13,6 @@ class BlockRef:
     id: str
 
 
-@dataclass(frozen=True)
-class SpreadsheetRef:
-    """Compatibility value used by existing test doubles during migration."""
-
-    id: str
-    url: str
-    sheet_id: str
-
-
 class FeishuClientProtocol(Protocol):
     async def create_document(
         self,

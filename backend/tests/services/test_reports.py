@@ -9,72 +9,99 @@ from app.core.db import Base, make_engine, make_session_factory
 from app.domain.results import Finding, FindingStatus, InspectionResult, Verdict
 from app.domain.states import ImageStatus, TaskStatus
 from app.domain.usage import UsageAvailability
-from app.repositories import REPORT_LAYOUT_OPERATION, REPORT_WORKSHEET_ID_KEY, TaskRepository
-from app.services.feishu_client import SpreadsheetRef
+from app.repositories import TaskRepository
+from app.services.feishu_client import BlockRef, DocumentRef
 from app.services.reports import ReportBuilder
 from tests.usage_fixtures import successful_usage
 
 
 @dataclass(frozen=True)
 class ImageCall:
-    spreadsheet_token: str
-    sheet_id: str
-    cell: str
-    image_path: Path
+    block_id: str
     filename: str
+    content: bytes
 
 
 class FakeFeishuClient:
     def __init__(self) -> None:
-        self.created_spreadsheets = 0
-        self.values: list[list[str]] = []
-        self.styles: dict = {}
+        self.created_documents = 0
+        self.appended_xml: list[str] = []
+        self.fetch_count = 0
+        self.image_parent_ids: list[str] = []
         self.image_calls: list[ImageCall] = []
-        self.cell_attempts: Counter[str] = Counter()
-        self.fail_cells: set[str] = set()
+        self.block_attempts: Counter[str] = Counter()
+        self.upload_attempts: Counter[str] = Counter()
+        self.fail_blocks: set[str] = set()
         self.delay = 0.0
         self.active_uploads = 0
         self.max_active_uploads = 0
 
-    async def create_spreadsheet(
+    async def create_document(
         self,
         title: str,
         folder_token: str,
-        values: list[list[str]],
-        styles: dict,
-    ) -> SpreadsheetRef:
+        client_token: str,
+    ) -> DocumentRef:
         assert title.startswith("report task 巡检报告")
         assert folder_token == "folder-1"
-        self.created_spreadsheets += 1
-        self.values = values
-        self.styles = styles
-        token = f"spreadsheet-{self.created_spreadsheets}"
-        return SpreadsheetRef(
+        assert client_token
+        self.created_documents += 1
+        token = f"document-{self.created_documents}"
+        return DocumentRef(
             token,
-            f"https://example.feishu.cn/sheets/{token}",
-            f"worksheet-{self.created_spreadsheets}",
+            f"https://example.feishu.cn/docx/{token}",
         )
 
-    async def set_cell_image(
+    async def append_document_xml(
         self,
-        spreadsheet_token: str,
-        sheet_id: str,
-        cell: str,
-        image_path: Path,
-        filename: str,
+        document_id: str,
+        content: str,
+        operation_key: str,
     ) -> None:
-        self.cell_attempts[cell] += 1
+        assert document_id.startswith("document-")
+        assert operation_key == "doc:layout"
+        self.appended_xml.append(content)
+
+    async def fetch_document_xml(self, document_id: str) -> str:
+        assert document_id.startswith("document-")
+        self.fetch_count += 1
+        return """
+        <table id="table-1">
+          <thead><tr><th id="a1"><p>巡检项</p></th><th id="b1"><p>安保</p></th><th id="d1"><p>前厅</p></th></tr></thead>
+          <tbody>
+            <tr><td id="a2"><p>巡检图片</p></td><td id="cell-b"><p></p></td><td id="cell-c"><p></p></td><td id="cell-d"><p></p></td></tr>
+            <tr><td id="a3"><p>巡检结果</p></td><td id="b3"><p>合格</p></td><td id="c3"><p>不合格</p></td><td id="d3"><p>无法判断</p></td></tr>
+          </tbody>
+        </table>
+        """
+
+    async def create_image_block(
+        self,
+        document_id: str,
+        parent_block_id: str,
+        operation_key: str,
+    ) -> BlockRef:
+        assert document_id.startswith("document-")
+        self.block_attempts[operation_key] += 1
+        self.image_parent_ids.append(parent_block_id)
+        return BlockRef(f"image-{parent_block_id}")
+
+    async def upload_docx_image(
+        self,
+        block_id: str,
+        filename: str,
+        content: bytes,
+    ) -> str:
+        self.upload_attempts[block_id] += 1
         self.active_uploads += 1
         self.max_active_uploads = max(self.max_active_uploads, self.active_uploads)
         try:
             if self.delay:
                 await asyncio.sleep(self.delay)
-            if cell in self.fail_cells:
-                raise RuntimeError("injected cell image failure")
-            assert image_path.is_file()
-            self.image_calls.append(
-                ImageCall(spreadsheet_token, sheet_id, cell, image_path, filename)
-            )
+            if block_id in self.fail_blocks:
+                raise RuntimeError("injected document image failure")
+            self.image_calls.append(ImageCall(block_id, filename, content))
+            return f"token-{block_id}"
         finally:
             self.active_uploads -= 1
 
@@ -195,48 +222,39 @@ def test_report_projection_matches_result_counts_and_usage(report_fixture) -> No
 
 
 @pytest.mark.asyncio
-async def test_report_creates_spreadsheet_and_places_matching_images(report_fixture) -> None:
+async def test_report_creates_docx_table_and_places_matching_images(report_fixture) -> None:
     exported = await report_fixture.builder.export(report_fixture.task_id)
 
     assert exported.status == "succeeded"
-    assert exported.document_id == "spreadsheet-1"
-    assert exported.document_url == "https://example.feishu.cn/sheets/spreadsheet-1"
-    assert exported.remote_blocks_json[REPORT_WORKSHEET_ID_KEY] == "worksheet-1"
-    assert exported.completed_operations_json[0] == REPORT_LAYOUT_OPERATION
+    assert exported.document_id == "document-1"
+    assert exported.document_url == "https://example.feishu.cn/docx/document-1"
+    assert exported.completed_operations_json[0] == "doc:layout"
     assert set(exported.completed_operations_json[1:]) == {
-        f"sheet-image:{item.image_id}"
+        f"doc-image:{item.image_id}"
         for item in report_fixture.builder.project(report_fixture.task_id).items
     }
-    assert report_fixture.feishu.created_spreadsheets == 1
-    assert report_fixture.feishu.values[0] == ["巡检项", "安保", "", "前厅"]
-    assert report_fixture.feishu.values[1] == ["巡检图片", "", "", ""]
-    assert report_fixture.feishu.values[2] == [
-        "巡检结果",
-        "合格",
-        "不合格\nresult-2",
-        "无法判断\nimage is obscured",
-    ]
-    assert report_fixture.feishu.values[3] == ["模型 Token 用量", "", "", ""]
-    assert report_fixture.feishu.values[4] == [
-        (
-            "总 Token：36\n"
-            "输入：30\n"
-            "缓存命中：12\n"
-            "未缓存输入：18\n"
-            "输出：6\n"
-            "推理 Token：0（包含在输出中）\n"
-            "已知调用：3"
-        ),
-        "",
-        "",
-        "",
-    ]
-    rendered = "\n".join(cell for row in report_fixture.feishu.values for cell in row)
+    assert report_fixture.feishu.created_documents == 1
+    assert len(report_fixture.feishu.appended_xml) == 1
+    rendered = report_fixture.feishu.appended_xml[0]
+    assert "巡检项" in rendered
+    assert "巡检图片" in rendered
+    assert "巡检结果" in rendered
+    assert "不合格<br/>result-2" in rendered
+    assert "无法判断<br/>image is obscured" in rendered
+    assert "总 Token：36" in rendered
     assert "raw_usage" not in rendered
     assert "费用" not in rendered
-    assert [call.cell for call in report_fixture.feishu.image_calls] == ["B2", "C2", "D2"]
-    assert all(call.spreadsheet_token == "spreadsheet-1" for call in report_fixture.feishu.image_calls)
-    assert all(call.sheet_id == "worksheet-1" for call in report_fixture.feishu.image_calls)
+    assert set(report_fixture.feishu.image_parent_ids) == {
+        "cell-b",
+        "cell-c",
+        "cell-d",
+    }
+    assert {call.block_id for call in report_fixture.feishu.image_calls} == {
+        "image-cell-b",
+        "image-cell-c",
+        "image-cell-d",
+    }
+    assert all(call.content.startswith(b"thumbnail-") for call in report_fixture.feishu.image_calls)
 
 
 @pytest.mark.asyncio
@@ -254,29 +272,34 @@ async def test_report_renders_partial_usage_as_known_only(report_fixture) -> Non
     assert exported.status == "succeeded"
     assert projection.token_usage.availability is UsageAvailability.PARTIAL
     assert projection.token_usage.total_tokens == 36
-    body = report_fixture.feishu.values[-1][0]
-    assert body.splitlines()[0] == "已知总 Token：36"
+    body = report_fixture.feishu.appended_xml[0]
+    assert "已知总 Token：36" in body
     assert "未返回、格式异常或未采集 usage：至少 1 次；不计入已知总量。" in body
     assert "总 Token：0" not in body
 
 
 @pytest.mark.asyncio
-async def test_retry_reuses_workbook_and_skips_completed_cell_images(report_fixture) -> None:
-    report_fixture.feishu.fail_cells.add("C2")
+async def test_retry_reuses_document_blocks_and_skips_completed_images(report_fixture) -> None:
+    report_fixture.feishu.fail_blocks.add("image-cell-c")
 
     first = await report_fixture.builder.export(report_fixture.task_id)
-    report_fixture.feishu.fail_cells.clear()
+    report_fixture.feishu.fail_blocks.clear()
     second = await report_fixture.builder.export(report_fixture.task_id)
 
     assert first.status == "failed"
     assert second.status == "succeeded"
-    assert first.document_id == second.document_id == "spreadsheet-1"
-    assert report_fixture.feishu.created_spreadsheets == 1
-    assert report_fixture.feishu.cell_attempts == Counter({"C2": 2, "B2": 1, "D2": 1})
+    assert first.document_id == second.document_id == "document-1"
+    assert report_fixture.feishu.created_documents == 1
+    assert len(report_fixture.feishu.appended_xml) == 1
+    assert report_fixture.feishu.fetch_count == 1
+    assert set(report_fixture.feishu.block_attempts.values()) == {1}
+    assert report_fixture.feishu.upload_attempts == Counter(
+        {"image-cell-c": 2, "image-cell-b": 1, "image-cell-d": 1}
+    )
 
 
 @pytest.mark.asyncio
-async def test_cell_image_uploads_use_bounded_concurrency(report_fixture) -> None:
+async def test_document_image_uploads_use_bounded_concurrency(report_fixture) -> None:
     report_fixture.feishu.delay = 0.01
 
     exported = await report_fixture.builder.export(report_fixture.task_id)
@@ -286,14 +309,14 @@ async def test_cell_image_uploads_use_bounded_concurrency(report_fixture) -> Non
 
 
 @pytest.mark.asyncio
-async def test_new_version_creates_a_new_spreadsheet(report_fixture) -> None:
+async def test_new_version_creates_a_new_document(report_fixture) -> None:
     first = await report_fixture.builder.export(report_fixture.task_id)
     second = await report_fixture.builder.export(report_fixture.task_id, new_version=True)
 
     assert first.id != second.id
-    assert first.document_id == "spreadsheet-1"
-    assert second.document_id == "spreadsheet-2"
-    assert report_fixture.feishu.created_spreadsheets == 2
+    assert first.document_id == "document-1"
+    assert second.document_id == "document-2"
+    assert report_fixture.feishu.created_documents == 2
 
 
 def test_recover_interrupted_export_requires_explicit_retry(report_fixture) -> None:
@@ -301,8 +324,8 @@ def test_recover_interrupted_export_requires_explicit_retry(report_fixture) -> N
         repo = TaskRepository(session)
         export = repo.get_or_create_active_export(report_fixture.task_id)
         export.status = "running"
-        export.document_id = "spreadsheet-existing"
-        export.remote_blocks_json = {REPORT_WORKSHEET_ID_KEY: "worksheet-existing"}
+        export.document_id = "document-existing"
+        export.remote_blocks_json = {"doc-cell:image-1": "cell-existing"}
         export.cursor = 3
         session.commit()
 
@@ -314,8 +337,8 @@ def test_recover_interrupted_export_requires_explicit_retry(report_fixture) -> N
         export = repo.get_or_create_active_export(report_fixture.task_id)
         assert export.status == "failed"
         assert export.error_code == "report_interrupted"
-        assert export.document_id == "spreadsheet-existing"
-        assert export.remote_blocks_json[REPORT_WORKSHEET_ID_KEY] == "worksheet-existing"
+        assert export.document_id == "document-existing"
+        assert export.remote_blocks_json["doc-cell:image-1"] == "cell-existing"
         assert export.cursor == 3
         assert repo.get_task(report_fixture.task_id).status == TaskStatus.REVIEW_REQUIRED
     assert report_fixture.feishu.image_calls == []

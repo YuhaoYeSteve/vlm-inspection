@@ -52,8 +52,8 @@ def test_all_success_task_automatically_creates_one_report(app_harness, png_file
     detail = wait_for_task(app_harness, task_id, {"completed"})
 
     assert detail["report_status"] == "succeeded"
-    assert detail["report_url"] == "https://example.feishu.cn/sheets/report-1"
-    assert app_harness.feishu_client.created_spreadsheets == 1
+    assert detail["report_url"] == "https://example.feishu.cn/docx/report-1"
+    assert app_harness.feishu_client.created_documents == 1
 
 
 def test_review_task_requires_confirmation_then_exports_without_model_retry(
@@ -83,7 +83,7 @@ def test_review_task_requires_confirmation_then_exports_without_model_retry(
     assert app_harness.inspector.call_count == model_calls
 
 
-def test_new_report_version_creates_another_spreadsheet_without_new_inference(
+def test_new_report_version_creates_another_document_without_new_inference(
     app_harness,
     png_file,
 ) -> None:
@@ -98,8 +98,8 @@ def test_new_report_version_creates_another_spreadsheet_without_new_inference(
     deadline = time.monotonic() + 3
     while (
         time.monotonic() < deadline
-        and app_harness.feishu_client.created_spreadsheets < 2
+        and app_harness.feishu_client.created_documents < 2
     ):
         time.sleep(0.01)
-    assert app_harness.feishu_client.created_spreadsheets == 2
+    assert app_harness.feishu_client.created_documents == 2
     assert app_harness.inspector.call_count == model_calls

@@ -12,12 +12,17 @@ from app.domain.results import InspectionResult
 from app.domain.states import ReportStatus, TaskStatus
 from app.domain.usage import TokenUsageSummary, summarize_attempt_payloads
 from app.models import ReportExport
-from app.repositories import REPORT_WORKSHEET_ID_KEY, TaskRepository
+from app.repositories import REPORT_LAYOUT_OPERATION, TaskRepository
 from app.services.events import TaskEventBroker
 from app.services.feishu_client import FeishuClientProtocol
 from app.services.feishu_oauth import FeishuReauthorizationRequired
 from app.services.lark_cli import FeishuConnectionProviderProtocol
-from app.services.report_sheet import SheetImagePlacement, SheetItem, render_report_sheet
+from app.services.report_document import (
+    DocumentImagePlacement,
+    DocumentItem,
+    parse_image_cell_ids,
+    render_report_document,
+)
 
 
 @dataclass(frozen=True)
@@ -171,38 +176,44 @@ class ReportBuilder:
     async def _write_export(self, export_id: str) -> None:
         export = self._get_export(export_id)
         projection = self.project(export.task_id)
-        layout = render_report_sheet(
-            tuple(self._sheet_item(item) for item in projection.items),
+        layout = render_report_document(
+            tuple(self._document_item(item) for item in projection.items),
             token_usage=projection.token_usage,
         )
-        sheet_id = self._worksheet_id(export)
-        if export.document_id is None or sheet_id is None:
+        if export.document_id is None:
             folder_token = self._folder_token()
             timestamp = datetime.now(UTC).astimezone().strftime("%Y-%m-%d %H:%M")
             title = f"{projection.task_name} 巡检报告 {timestamp}"
-            spreadsheet = await self.feishu.create_spreadsheet(
+            document = await self.feishu.create_document(
                 title,
                 folder_token,
-                [list(row) for row in layout.values],
-                layout.styles,
-            )
-            self._save_spreadsheet(
                 export.id,
-                spreadsheet.id,
-                spreadsheet.url,
-                spreadsheet.sheet_id,
             )
+            self._save_document(export.id, document.id, document.url)
             export = self._get_export(export.id)
-            sheet_id = spreadsheet.sheet_id
         assert export.document_id is not None
-        assert sheet_id is not None
-        await self._write_sheet_images(export, export.document_id, sheet_id, layout.images)
+        document_id = export.document_id
+        if not self._operation_completed(export.id, REPORT_LAYOUT_OPERATION):
+            await self.feishu.append_document_xml(
+                document_id,
+                layout.xml,
+                REPORT_LAYOUT_OPERATION,
+            )
+            self._mark_operation_completed(export.id, REPORT_LAYOUT_OPERATION)
+            export = self._get_export(export.id)
+        image_cells = await self._ensure_image_cells(export, layout.images)
+        await self._write_document_images(
+            export,
+            document_id,
+            layout.images,
+            image_cells,
+        )
         self._mark_succeeded(export.id)
 
     @staticmethod
-    def _sheet_item(item: ReportItem) -> SheetItem:
+    def _document_item(item: ReportItem) -> DocumentItem:
         result = item.result
-        return SheetItem(
+        return DocumentItem(
             image_id=item.image_id,
             filename=item.filename,
             image_path=Path(item.thumbnail_path),
@@ -214,12 +225,37 @@ class ReportBuilder:
             execution_status=item.execution_status,
         )
 
-    async def _write_sheet_images(
+    async def _ensure_image_cells(
         self,
         export: ReportExport,
-        spreadsheet_token: str,
-        sheet_id: str,
-        placements: tuple[SheetImagePlacement, ...],
+        placements: tuple[DocumentImagePlacement, ...],
+    ) -> dict[str, str]:
+        existing = {
+            placement.image_id: self._remote_block(
+                export.id,
+                f"doc-cell:{placement.image_id}",
+            )
+            for placement in placements
+        }
+        if all(existing.values()):
+            return {image_id: cell_id for image_id, cell_id in existing.items() if cell_id}
+
+        assert export.document_id is not None
+        content = await self.feishu.fetch_document_xml(export.document_id)
+        cell_ids = parse_image_cell_ids(content, expected_count=len(placements))
+        for placement, cell_id in zip(placements, cell_ids, strict=True):
+            key = f"doc-cell:{placement.image_id}"
+            if existing[placement.image_id] is None:
+                self._save_remote_block(export.id, key, cell_id)
+            existing[placement.image_id] = cell_id
+        return {image_id: cell_id for image_id, cell_id in existing.items() if cell_id}
+
+    async def _write_document_images(
+        self,
+        export: ReportExport,
+        document_id: str,
+        placements: tuple[DocumentImagePlacement, ...],
+        image_cells: dict[str, str],
     ) -> None:
         pending = [
             placement
@@ -229,14 +265,22 @@ class ReportBuilder:
         semaphore = asyncio.Semaphore(self.image_upload_concurrency)
         ledger_lock = asyncio.Lock()
 
-        async def upload(placement: SheetImagePlacement) -> None:
+        async def upload(placement: DocumentImagePlacement) -> None:
             async with semaphore:
-                await self.feishu.set_cell_image(
-                    spreadsheet_token,
-                    sheet_id,
-                    placement.cell,
-                    placement.path,
+                block_key = f"doc-image-block:{placement.image_id}"
+                block_id = self._remote_block(export.id, block_key)
+                if block_id is None:
+                    block = await self.feishu.create_image_block(
+                        document_id,
+                        image_cells[placement.image_id],
+                        block_key,
+                    )
+                    block_id = block.id
+                    self._save_remote_block(export.id, block_key, block_id)
+                await self.feishu.upload_docx_image(
+                    block_id,
                     placement.filename,
+                    placement.path.read_bytes(),
                 )
             async with ledger_lock:
                 self._mark_operation_completed(export.id, placement.operation_key)
@@ -258,26 +302,19 @@ class ReportBuilder:
         with self.sessions() as session:
             return TaskRepository(session).get_export(export_id)
 
-    def _save_spreadsheet(
+    def _save_document(
         self,
         export_id: str,
-        spreadsheet_token: str,
-        spreadsheet_url: str,
-        worksheet_id: str,
+        document_id: str,
+        document_url: str,
     ) -> None:
         with self.sessions() as session:
-            TaskRepository(session).save_export_spreadsheet(
+            TaskRepository(session).save_export_document(
                 export_id,
-                spreadsheet_token,
-                spreadsheet_url,
-                worksheet_id,
+                document_id,
+                document_url,
             )
             session.commit()
-
-    @staticmethod
-    def _worksheet_id(export: ReportExport) -> str | None:
-        value = export.remote_blocks_json.get(REPORT_WORKSHEET_ID_KEY)
-        return value if isinstance(value, str) and value else None
 
     def _operation_completed(self, export_id: str, operation_key: str) -> bool:
         with self.sessions() as session:
@@ -286,6 +323,23 @@ class ReportBuilder:
     def _mark_operation_completed(self, export_id: str, operation_key: str) -> None:
         with self.sessions() as session:
             TaskRepository(session).mark_operation_completed(export_id, operation_key)
+            session.commit()
+
+    def _remote_block(self, export_id: str, operation_key: str) -> str | None:
+        with self.sessions() as session:
+            value = TaskRepository(session).get_export(export_id).remote_blocks_json.get(
+                operation_key
+            )
+            return value if isinstance(value, str) and value else None
+
+    def _save_remote_block(
+        self,
+        export_id: str,
+        operation_key: str,
+        block_id: str,
+    ) -> None:
+        with self.sessions() as session:
+            TaskRepository(session).save_remote_block(export_id, operation_key, block_id)
             session.commit()
 
     def _mark_succeeded(self, export_id: str) -> None:

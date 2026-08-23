@@ -1,6 +1,5 @@
 import tempfile
 from pathlib import Path
-from typing import Any
 
 from app.core.config import Settings
 from app.core.db import Base, make_engine, make_session_factory
@@ -8,7 +7,7 @@ from app.domain.results import Finding, FindingStatus, InspectionResult, Verdict
 from app.main import create_app
 from app.repositories import SettingsRepository
 from app.services.ark import ArkRuntimeConfig, InspectionOutcome
-from app.services.feishu_client import SpreadsheetRef
+from app.services.feishu_client import BlockRef, DocumentRef
 from app.services.lark_cli import FeishuConnection
 from tests.usage_fixtures import successful_usage
 
@@ -56,29 +55,58 @@ class DeterministicInspectionService:
 
 
 class DeterministicFeishuClient:
-    async def create_spreadsheet(
+    def __init__(self) -> None:
+        self.appended_xml = ""
+
+    async def create_document(
         self,
         title: str,
         folder_token: str,
-        values: list[list[str]],
-        styles: dict[str, Any],
-    ) -> SpreadsheetRef:
-        del title, folder_token, values, styles
-        return SpreadsheetRef(
+        client_token: str,
+    ) -> DocumentRef:
+        del title, folder_token, client_token
+        return DocumentRef(
             "report-1",
-            "https://example.feishu.cn/sheets/report-1",
-            "worksheet-1",
+            "https://example.feishu.cn/docx/report-1",
         )
 
-    async def set_cell_image(
+    async def append_document_xml(
         self,
-        spreadsheet_token: str,
-        sheet_id: str,
-        cell: str,
-        image_path: Path,
-        filename: str,
+        document_id: str,
+        content: str,
+        operation_key: str,
     ) -> None:
-        del spreadsheet_token, sheet_id, cell, image_path, filename
+        del document_id, operation_key
+        self.appended_xml = content
+
+    async def fetch_document_xml(self, document_id: str) -> str:
+        del document_id
+        image_count = self.appended_xml.count(
+            '<td vertical-align="middle"><p></p></td>'
+        )
+        cells = "".join(
+            f'<td id="cell-{index}"><p></p></td>'
+            for index in range(image_count)
+        )
+        return f"<table><tbody><tr><td><p>巡检图片</p></td>{cells}</tr></tbody></table>"
+
+    async def create_image_block(
+        self,
+        document_id: str,
+        parent_block_id: str,
+        operation_key: str,
+    ) -> BlockRef:
+        del document_id, operation_key
+        return BlockRef(f"image-{parent_block_id}")
+
+    async def upload_docx_image(
+        self,
+        block_id: str,
+        filename: str,
+        content: bytes,
+    ) -> str:
+        del filename, content
+        return f"token-{block_id}"
 
 
 class DeterministicFeishuConnectionProvider:
@@ -92,7 +120,7 @@ class DeterministicFeishuConnectionProvider:
             token_status="valid",
             expires_at=None,
             destination_path="E2E 报告目录",
-            reference_url="https://example.feishu.cn/sheets/reference",
+            reference_url="https://example.feishu.cn/docx/reference",
             error_code=None,
         )
 
@@ -102,7 +130,7 @@ _settings = Settings(
     data_dir=Path(_runtime.name),
     feishu_parent_token="folder-e2e",
     feishu_parent_label="E2E 报告目录",
-    feishu_reference_url="https://example.feishu.cn/sheets/reference",
+    feishu_reference_url="https://example.feishu.cn/docx/reference",
 )
 _settings.ensure_directories()
 _engine = make_engine(_settings.database_path)
