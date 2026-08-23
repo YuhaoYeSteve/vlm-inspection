@@ -7,6 +7,7 @@ import {
 } from "@phosphor-icons/react";
 
 import type { TaskDetail, TaskStatus, UploadSummary } from "../../api/types";
+import { TokenUsageSummary } from "./TokenUsageSummary";
 
 const taskStatusLabels: Record<TaskStatus, string> = {
   draft: "草稿",
@@ -143,6 +144,8 @@ export function TaskToolbar({
         <div className="metric-warning"><span>无法判断</span><strong>{task.counts.unverifiable}</strong></div>
         <div className="metric-error"><span>执行失败</span><strong>{task.counts.failed}</strong></div>
       </section>
+
+      <TokenUsageSummary usage={task.token_usage} />
 
       {uploadSummary && (
         <p className="upload-summary" role="status">

@@ -95,6 +95,39 @@ export interface TaskCounts {
   failed: number;
 }
 
+export type TokenUsageAvailability =
+  | "not_started"
+  | "complete"
+  | "partial"
+  | "unavailable"
+  | "untracked";
+
+export interface TokenUsageSummary {
+  availability: TokenUsageAvailability;
+  input_tokens: number;
+  cached_input_tokens: number;
+  uncached_input_tokens: number;
+  output_tokens: number;
+  reasoning_tokens: number;
+  total_tokens: number;
+  known_call_count: number;
+  unknown_call_count: number;
+}
+
+export interface TokenUsageCall {
+  attempt_number: number;
+  sequence: number;
+  protocol: "responses" | "chat";
+  purpose: "inspection" | "schema_fallback" | "json_repair";
+  status: "succeeded" | "failed";
+  usage_error: "not_returned" | "invalid_usage" | null;
+  input_tokens: number | null;
+  cached_input_tokens: number | null;
+  output_tokens: number | null;
+  reasoning_tokens: number | null;
+  total_tokens: number | null;
+}
+
 export interface TaskImage {
   id: string;
   position: number;
@@ -106,6 +139,8 @@ export interface TaskImage {
   error_message: string | null;
   original_url: string;
   thumbnail_url: string;
+  token_usage: TokenUsageSummary;
+  token_calls: TokenUsageCall[];
   result: InspectionResult | null;
 }
 
@@ -123,6 +158,7 @@ export interface TaskSummary {
   report_id: string | null;
   report_status: string | null;
   report_url: string | null;
+  token_usage: TokenUsageSummary;
 }
 
 export interface TaskDetail extends TaskSummary {

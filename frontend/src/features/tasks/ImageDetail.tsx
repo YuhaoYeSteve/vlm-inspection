@@ -2,6 +2,7 @@ import { ArrowClockwise, Clock, SpinnerGap, WarningCircle } from "@phosphor-icon
 
 import type { TaskImage } from "../../api/types";
 import { ResultPanel } from "./ResultPanel";
+import { TokenUsageDetails } from "./TokenUsageDetails";
 
 interface ImageDetailProps {
   image: TaskImage | null;
@@ -32,6 +33,12 @@ export function ImageDetail({ image, retrying, onRetry }: ImageDetailProps) {
       </div>
 
       {image.result && <ResultPanel result={image.result} />}
+
+      <TokenUsageDetails
+        imageName={image.original_name}
+        usage={image.token_usage}
+        calls={image.token_calls}
+      />
 
       {image.status === "failed" && (
         <section className="execution-error" aria-label="图片执行失败">

@@ -17,6 +17,30 @@ const finding = {
   visual_evidence: "左胸区域无遮挡，未出现工牌",
 };
 
+const taskUsage = {
+  availability: "partial" as const,
+  input_tokens: 1701,
+  cached_input_tokens: 520,
+  uncached_input_tokens: 1181,
+  output_tokens: 299,
+  reasoning_tokens: 0,
+  total_tokens: 2000,
+  known_call_count: 3,
+  unknown_call_count: 2,
+};
+
+const selectedImageUsage = {
+  availability: "partial" as const,
+  input_tokens: 1101,
+  cached_input_tokens: 420,
+  uncached_input_tokens: 681,
+  output_tokens: 183,
+  reasoning_tokens: 0,
+  total_tokens: 1284,
+  known_call_count: 2,
+  unknown_call_count: 1,
+};
+
 const taskDetail: TaskDetail = {
   id: "task-1",
   name: "门店巡检",
@@ -31,6 +55,7 @@ const taskDetail: TaskDetail = {
   report_id: null,
   report_status: null,
   report_url: null,
+  token_usage: taskUsage,
   template_snapshot: {},
   model_snapshot: {},
   images: [
@@ -45,6 +70,32 @@ const taskDetail: TaskDetail = {
       error_message: null,
       original_url: "/api/image-1/original",
       thumbnail_url: "/api/image-1/thumb",
+      token_usage: {
+        availability: "complete",
+        input_tokens: 600,
+        cached_input_tokens: 100,
+        uncached_input_tokens: 500,
+        output_tokens: 116,
+        reasoning_tokens: 0,
+        total_tokens: 716,
+        known_call_count: 1,
+        unknown_call_count: 0,
+      },
+      token_calls: [
+        {
+          attempt_number: 1,
+          sequence: 1,
+          protocol: "responses",
+          purpose: "inspection",
+          status: "succeeded",
+          usage_error: null,
+          input_tokens: 600,
+          cached_input_tokens: 100,
+          output_tokens: 116,
+          reasoning_tokens: 0,
+          total_tokens: 716,
+        },
+      ],
       result: {
         schema_version: 1,
         image_valid: true,
@@ -65,6 +116,48 @@ const taskDetail: TaskDetail = {
       error_message: null,
       original_url: "/api/image-2/original",
       thumbnail_url: "/api/image-2/thumb",
+      token_usage: selectedImageUsage,
+      token_calls: [
+        {
+          attempt_number: 1,
+          sequence: 1,
+          protocol: "responses",
+          purpose: "inspection",
+          status: "succeeded",
+          usage_error: null,
+          input_tokens: 712,
+          cached_input_tokens: 420,
+          output_tokens: 108,
+          reasoning_tokens: 0,
+          total_tokens: 820,
+        },
+        {
+          attempt_number: 1,
+          sequence: 2,
+          protocol: "responses",
+          purpose: "json_repair",
+          status: "succeeded",
+          usage_error: null,
+          input_tokens: 389,
+          cached_input_tokens: 0,
+          output_tokens: 75,
+          reasoning_tokens: 0,
+          total_tokens: 464,
+        },
+        {
+          attempt_number: 2,
+          sequence: 1,
+          protocol: "responses",
+          purpose: "inspection",
+          status: "failed",
+          usage_error: "not_returned",
+          input_tokens: null,
+          cached_input_tokens: null,
+          output_tokens: null,
+          reasoning_tokens: null,
+          total_tokens: null,
+        },
+      ],
       result: {
         schema_version: 1,
         image_valid: true,
@@ -85,6 +178,32 @@ const taskDetail: TaskDetail = {
       error_message: "模型请求超时",
       original_url: "/api/image-3/original",
       thumbnail_url: "/api/image-3/thumb",
+      token_usage: {
+        availability: "unavailable",
+        input_tokens: 0,
+        cached_input_tokens: 0,
+        uncached_input_tokens: 0,
+        output_tokens: 0,
+        reasoning_tokens: 0,
+        total_tokens: 0,
+        known_call_count: 0,
+        unknown_call_count: 1,
+      },
+      token_calls: [
+        {
+          attempt_number: 3,
+          sequence: 1,
+          protocol: "responses",
+          purpose: "inspection",
+          status: "failed",
+          usage_error: "not_returned",
+          input_tokens: null,
+          cached_input_tokens: null,
+          output_tokens: null,
+          reasoning_tokens: null,
+          total_tokens: null,
+        },
+      ],
       result: null,
     },
   ],
@@ -141,6 +260,47 @@ test("keeps gallery and single-image evidence visible together", async () => {
 
   expect(screen.getByRole("img", { name: "IMG_002.png 大图" })).toBeInTheDocument();
   expect(screen.getByText("左胸区域无遮挡，未出现工牌")).toBeInTheDocument();
+});
+
+test("shows task totals and expands every call for selected image", async () => {
+  const user = userEvent.setup();
+  renderTask();
+
+  const taskTokenUsage = await screen.findByRole("region", { name: "任务 Token 用量" });
+  expect(within(taskTokenUsage).getByText("2,000")).toBeInTheDocument();
+  expect(within(taskTokenUsage).getByText("缓存命中")).toBeInTheDocument();
+  expect(within(taskTokenUsage).getByText("2 次调用用量未知")).toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: "查看 IMG_002.png" }));
+  const imageTokenUsage = screen.getByRole("region", { name: "IMG_002.png Token 用量" });
+  expect(within(imageTokenUsage).getByText("1,284")).toBeInTheDocument();
+
+  await user.click(within(imageTokenUsage).getByRole("button", { name: "展开调用明细" }));
+  expect(within(imageTokenUsage).getByText("尝试 1 · 初始检查")).toBeInTheDocument();
+  expect(within(imageTokenUsage).getByText("尝试 1 · JSON 修复")).toBeInTheDocument();
+  expect(within(imageTokenUsage).getByText("方舟未返回 usage")).toBeInTheDocument();
+});
+
+test("shows the untracked message instead of zero totals for old tasks", async () => {
+  renderTask({
+    ...taskDetail,
+    token_usage: {
+      availability: "untracked",
+      input_tokens: 0,
+      cached_input_tokens: 0,
+      uncached_input_tokens: 0,
+      output_tokens: 0,
+      reasoning_tokens: 0,
+      total_tokens: 0,
+      known_call_count: 0,
+      unknown_call_count: 0,
+    },
+  });
+
+  const taskTokenUsage = await screen.findByRole("region", { name: "任务 Token 用量" });
+  expect(within(taskTokenUsage).getByText("该任务运行时尚未采集 Token 用量")).toBeInTheDocument();
+  expect(within(taskTokenUsage).queryByText("总 Token")).not.toBeInTheDocument();
+  expect(taskTokenUsage).not.toHaveTextContent(/总 Token\s*0/);
 });
 
 test("filters statuses and retries only failed images", async () => {
