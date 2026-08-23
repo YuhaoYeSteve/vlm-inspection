@@ -180,13 +180,14 @@ async def test_template(
                 },
                 image.original_path.name,
             )
-            return await asyncio.to_thread(
+            outcome = await asyncio.to_thread(
                 ark.inspector.inspect,
                 ark.runtime_config,
                 prompt.system,
                 prompt.user,
                 image.inference_path,
             )
+            return outcome.result
     except UnsupportedImage as exc:
         raise ApiError(422, "unsupported_image", str(exc)) from exc
 

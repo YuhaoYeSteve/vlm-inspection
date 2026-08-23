@@ -6,8 +6,9 @@ from app.core.db import Base, make_engine, make_session_factory
 from app.domain.results import Finding, FindingStatus, InspectionResult, Verdict
 from app.main import create_app
 from app.repositories import SettingsRepository
-from app.services.ark import ArkRuntimeConfig
+from app.services.ark import ArkRuntimeConfig, InspectionOutcome
 from app.services.feishu_client import BlockRef, DocumentRef
+from tests.usage_fixtures import successful_usage
 
 
 class MemorySecretStore:
@@ -31,21 +32,24 @@ class DeterministicInspectionService:
         system_prompt: str,
         user_prompt: str,
         image_path: Path,
-    ) -> InspectionResult:
-        del config, system_prompt, user_prompt
-        return InspectionResult(
-            image_valid=True,
-            verdict=Verdict.PASS,
-            summary=f"{image_path.name} 可见项目通过",
-            findings=[
-                Finding(
-                    rule_id="appearance",
-                    rule_name="仪容仪表",
-                    status=FindingStatus.PASS,
-                    observation="可见区域无明显违规",
-                    visual_evidence="人物上半身清晰可见",
-                )
-            ],
+    ) -> InspectionOutcome:
+        del system_prompt, user_prompt
+        return InspectionOutcome(
+            result=InspectionResult(
+                image_valid=True,
+                verdict=Verdict.PASS,
+                summary=f"{image_path.name} 可见项目通过",
+                findings=[
+                    Finding(
+                        rule_id="appearance",
+                        rule_name="仪容仪表",
+                        status=FindingStatus.PASS,
+                        observation="可见区域无明显违规",
+                        visual_evidence="人物上半身清晰可见",
+                    )
+                ],
+            ),
+            usage=successful_usage(config.protocol),
         )
 
 

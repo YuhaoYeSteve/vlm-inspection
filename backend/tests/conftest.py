@@ -13,9 +13,10 @@ from app.core.config import Settings
 from app.core.db import Base, make_engine
 from app.domain.results import Finding, FindingStatus, InspectionResult, Verdict
 from app.main import create_app
-from app.services.ark import ArkRuntimeConfig
+from app.services.ark import ArkRuntimeConfig, InspectionOutcome
 from app.services.feishu_client import BlockRef, DocumentRef
 from app.services.lark_cli import FeishuConnection
+from tests.usage_fixtures import failed_usage, successful_usage
 
 
 @dataclass
@@ -61,31 +62,42 @@ class FakeInspectionService:
         system_prompt: str,
         user_prompt: str,
         image_path: Path,
-    ) -> InspectionResult:
+    ) -> InspectionOutcome:
         self.call_count += 1
         if self.delay:
             time.sleep(self.delay)
         if self.error_status is not None:
             from app.services.ark import ArkRequestError
 
-            raise ArkRequestError(self.error_status, {}, "fake_error")
+            raise ArkRequestError(
+                self.error_status,
+                {},
+                "fake_error",
+                usage=failed_usage(config.protocol),
+            )
         if self.malformed:
             from app.services.ark import MalformedInspectionResult
 
-            raise MalformedInspectionResult("fake malformed output")
-        return InspectionResult(
-            image_valid=True,
-            verdict=Verdict.PASS,
-            summary="test image is readable",
-            findings=[
-                Finding(
-                    rule_id="readable",
-                    rule_name="readable",
-                    status=FindingStatus.PASS,
-                    observation="image decoded",
-                    visual_evidence=image_path.name,
-                )
-            ],
+            raise MalformedInspectionResult(
+                "fake malformed output",
+                usage=successful_usage(config.protocol),
+            )
+        return InspectionOutcome(
+            result=InspectionResult(
+                image_valid=True,
+                verdict=Verdict.PASS,
+                summary="test image is readable",
+                findings=[
+                    Finding(
+                        rule_id="readable",
+                        rule_name="readable",
+                        status=FindingStatus.PASS,
+                        observation="image decoded",
+                        visual_evidence=image_path.name,
+                    )
+                ],
+            ),
+            usage=successful_usage(config.protocol),
         )
 
 

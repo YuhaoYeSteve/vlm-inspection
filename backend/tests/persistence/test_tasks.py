@@ -2,6 +2,7 @@ from sqlalchemy import func, select
 
 from app.core.db import Base, make_engine, make_session_factory
 from app.domain.states import ImageStatus, ReportStatus, TaskStatus
+from app.domain.usage import AttemptUsageCollector
 from app.models import InferenceAttempt, InferenceResultRecord
 from app.repositories import TaskRepository
 
@@ -47,12 +48,23 @@ def test_claim_result_attempt_and_export_are_transactional(tmp_path) -> None:
         assert claimed.status == ImageStatus.RUNNING
         assert claimed.attempt_count == 1
 
-        repo.record_attempt(
+        usage = AttemptUsageCollector("responses")
+        usage.add_response(
+            "inspection",
+            {
+                "input_tokens": 10,
+                "input_tokens_details": {"cached_tokens": 4},
+                "output_tokens": 2,
+                "output_tokens_details": {"reasoning_tokens": 0},
+                "total_tokens": 12,
+            },
+        )
+        attempt = repo.record_attempt(
             first.id,
             status="succeeded",
             status_code=200,
             duration_ms=12,
-            usage={"input_tokens": 10},
+            usage=usage.snapshot().model_dump(mode="json"),
         )
         old_result = repo.save_result(
             first.id,
@@ -75,6 +87,8 @@ def test_claim_result_attempt_and_export_are_transactional(tmp_path) -> None:
         assert repo.get_image(second.id).status == ImageStatus.QUEUED
         assert export.id == same_export.id
         assert export.status == ReportStatus.PENDING
+        assert attempt.usage_json is not None
+        assert attempt.usage_json["schema_version"] == 1
         assert session.scalar(select(func.count()).select_from(InferenceAttempt)) == 1
         assert (
             session.scalar(

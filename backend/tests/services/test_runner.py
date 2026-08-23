@@ -11,12 +11,19 @@ from starlette.testclient import TestClient
 from app.core.db import Base, make_engine, make_session_factory
 from app.domain.results import Finding, FindingStatus, InspectionResult, Verdict
 from app.domain.states import ImageStatus, TaskStatus
+from app.domain.usage import AttemptUsageTrace
 from app.main import create_app
 from app.models import InferenceAttempt, InspectionTask, TaskImage
 from app.repositories import TaskRepository
-from app.services.ark import ArkRequestError, ArkRuntimeConfig, MalformedInspectionResult
+from app.services.ark import (
+    ArkRequestError,
+    ArkRuntimeConfig,
+    InspectionOutcome,
+    MalformedInspectionResult,
+)
 from app.services.events import TaskEventBroker
 from app.services.runner import TaskRunner
+from tests.usage_fixtures import failed_usage, successful_usage
 
 
 def passing_result(marker: str) -> InspectionResult:
@@ -59,8 +66,8 @@ class FakeInspector:
         system_prompt: str,
         user_prompt: str,
         image_path: Path,
-    ) -> InspectionResult:
-        del config, system_prompt, user_prompt
+    ) -> InspectionOutcome:
+        del system_prompt, user_prompt
         with self._lock:
             self.active += 1
             self.call_count += 1
@@ -70,12 +77,28 @@ class FakeInspector:
             if self.delay:
                 time.sleep(self.delay)
             if self.error_status is not None:
-                raise ArkRequestError(self.error_status, {}, "fake_error")
+                raise ArkRequestError(
+                    self.error_status,
+                    {},
+                    "fake_error",
+                    usage=failed_usage(config.protocol),
+                )
             if call_number <= self.rate_limit_failures:
-                raise ArkRequestError(429, {"retry-after": "0.001"}, "rate_limit")
+                raise ArkRequestError(
+                    429,
+                    {"retry-after": "0.001"},
+                    "rate_limit",
+                    usage=failed_usage(config.protocol),
+                )
             if self.malformed:
-                raise MalformedInspectionResult("bad model output")
-            return passing_result(image_path.name)
+                raise MalformedInspectionResult(
+                    "bad model output",
+                    usage=successful_usage(config.protocol),
+                )
+            return InspectionOutcome(
+                result=passing_result(image_path.name),
+                usage=successful_usage(config.protocol),
+            )
         finally:
             with self._lock:
                 self.active -= 1
@@ -107,6 +130,14 @@ class TaskFixture:
     def attempt_count(self) -> int:
         with self.sessions() as session:  # type: ignore[operator]
             return int(session.scalar(select(func.count()).select_from(InferenceAttempt)) or 0)
+
+    def attempts(self) -> list[InferenceAttempt]:
+        with self.sessions() as session:  # type: ignore[operator]
+            return list(
+                session.scalars(
+                    select(InferenceAttempt).order_by(InferenceAttempt.created_at)
+                )
+            )
 
 
 def make_task_fixture(
@@ -184,6 +215,28 @@ async def test_runner_uses_task_snapshot_concurrency(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_runner_persists_versioned_usage_trace_for_success(tmp_path) -> None:
+    fixture = make_task_fixture(tmp_path, image_count=1)
+    runner = TaskRunner(fixture.sessions, FakeInspector(), concurrency=1)
+
+    await runner.run_task(fixture.task_id)
+
+    attempts = fixture.attempts()
+    assert len(attempts) == 1
+    trace = AttemptUsageTrace.model_validate(attempts[0].usage_json)
+    assert trace.schema_version == 1
+    assert trace.totals.model_dump() == {
+        "known_call_count": 1,
+        "unknown_call_count": 0,
+        "input_tokens": 10,
+        "cached_input_tokens": 4,
+        "output_tokens": 2,
+        "reasoning_tokens": 0,
+        "total_tokens": 12,
+    }
+
+
+@pytest.mark.asyncio
 async def test_runner_pauses_task_on_auth_error(tmp_path) -> None:
     fixture = make_task_fixture(tmp_path)
     runner = TaskRunner(fixture.sessions, FakeInspector(error_status=401), concurrency=3)
@@ -208,6 +261,25 @@ async def test_runner_retries_429_twice_then_succeeds(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_runner_preserves_failed_and_successful_retry_usage(tmp_path) -> None:
+    fixture = make_task_fixture(tmp_path, image_count=1)
+    inspector = FakeInspector(rate_limit_failures=1)
+    runner = TaskRunner(fixture.sessions, inspector, concurrency=1, sleep=lambda _delay: None)
+
+    await runner.run_task(fixture.task_id)
+
+    attempts = fixture.attempts()
+    assert [attempt.status for attempt in attempts] == ["failed", "succeeded"]
+    failed_trace = AttemptUsageTrace.model_validate(attempts[0].usage_json)
+    successful_trace = AttemptUsageTrace.model_validate(attempts[1].usage_json)
+    assert failed_trace.totals.known_call_count == 0
+    assert failed_trace.totals.unknown_call_count == 1
+    assert successful_trace.totals.known_call_count == 1
+    assert successful_trace.totals.unknown_call_count == 0
+    assert successful_trace.totals.total_tokens == 12
+
+
+@pytest.mark.asyncio
 async def test_malformed_result_becomes_failed_and_requires_review(tmp_path) -> None:
     fixture = make_task_fixture(tmp_path, image_count=1)
     runner = TaskRunner(fixture.sessions, FakeInspector(malformed=True), concurrency=1)
@@ -216,6 +288,11 @@ async def test_malformed_result_becomes_failed_and_requires_review(tmp_path) -> 
 
     assert fixture.count_images(ImageStatus.FAILED) == 1
     assert fixture.task_status() == TaskStatus.REVIEW_REQUIRED
+    attempts = fixture.attempts()
+    assert len(attempts) == 1
+    trace = AttemptUsageTrace.model_validate(attempts[0].usage_json)
+    assert trace.totals.known_call_count == 1
+    assert trace.totals.total_tokens == 12
 
 
 @pytest.mark.asyncio

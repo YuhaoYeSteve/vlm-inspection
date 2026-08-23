@@ -229,7 +229,7 @@ class TaskRunner:
         while True:
             started = time.monotonic()
             try:
-                result = self.inspector.inspect(
+                outcome = self.inspector.inspect(
                     config,
                     system_prompt,
                     user_prompt,
@@ -242,6 +242,11 @@ class TaskRunner:
                     status_code=exc.status_code,
                     error_code=exc.code or "ark_request_failed",
                     duration_ms=self._duration_ms(started),
+                    usage=(
+                        exc.usage.model_dump(mode="json")
+                        if exc.usage is not None
+                        else None
+                    ),
                 )
                 decision = policy.classify(exc.status_code, exc.headers, retry_index)
                 if decision.pause_task:
@@ -263,14 +268,20 @@ class TaskRunner:
                     status="failed",
                     error_code="invalid_model_output",
                     duration_ms=self._duration_ms(started),
+                    usage=(
+                        exc.usage.model_dump(mode="json")
+                        if exc.usage is not None
+                        else None
+                    ),
                 )
                 raise InspectionFailed("invalid_model_output", str(exc)) from exc
             self._record_attempt(
                 image.id,
                 status="succeeded",
                 duration_ms=self._duration_ms(started),
+                usage=outcome.usage.model_dump(mode="json"),
             )
-            return result
+            return outcome.result
 
     def _inspection_context(
         self,
@@ -299,6 +310,7 @@ class TaskRunner:
         duration_ms: int,
         status_code: int | None = None,
         error_code: str | None = None,
+        usage: dict[str, object] | None = None,
     ) -> None:
         with self.sessions() as session:
             TaskRepository(session).record_attempt(
@@ -307,6 +319,7 @@ class TaskRunner:
                 status_code=status_code,
                 error_code=error_code,
                 duration_ms=duration_ms,
+                usage=usage,
             )
             session.commit()
 

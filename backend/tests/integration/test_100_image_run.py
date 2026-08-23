@@ -17,8 +17,9 @@ from app.domain.states import TaskStatus
 from app.main import create_app
 from app.models import InferenceResultRecord, InspectionTask, TaskImage
 from app.repositories import TaskRepository
-from app.services.ark import ArkRuntimeConfig
+from app.services.ark import ArkRuntimeConfig, InspectionOutcome
 from app.services.runner import TaskRunner
+from tests.usage_fixtures import successful_usage
 
 
 class MemorySecretStore:
@@ -42,22 +43,25 @@ class MarkerInspector:
         system_prompt: str,
         user_prompt: str,
         image_path: Path,
-    ) -> InspectionResult:
-        del config, system_prompt, user_prompt
+    ) -> InspectionOutcome:
+        del system_prompt, user_prompt
         marker = hashlib.sha256(image_path.read_bytes()).hexdigest()
-        return InspectionResult(
-            image_valid=True,
-            verdict=Verdict.PASS,
-            summary=marker,
-            findings=[
-                Finding(
-                    rule_id="binding",
-                    rule_name="result binding",
-                    status=FindingStatus.PASS,
-                    observation=marker,
-                    visual_evidence=marker,
-                )
-            ],
+        return InspectionOutcome(
+            result=InspectionResult(
+                image_valid=True,
+                verdict=Verdict.PASS,
+                summary=marker,
+                findings=[
+                    Finding(
+                        rule_id="binding",
+                        rule_name="result binding",
+                        status=FindingStatus.PASS,
+                        observation=marker,
+                        visual_evidence=marker,
+                    )
+                ],
+            ),
+            usage=successful_usage(config.protocol),
         )
 
 
@@ -75,7 +79,7 @@ class GatedInspector(MarkerInspector):
         system_prompt: str,
         user_prompt: str,
         image_path: Path,
-    ) -> InspectionResult:
+    ) -> InspectionOutcome:
         with self._lock:
             self.calls += 1
             call_number = self.calls
