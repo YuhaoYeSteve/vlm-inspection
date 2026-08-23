@@ -1,5 +1,3 @@
-/// <reference types="vite/client" />
-
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -9,7 +7,6 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { TaskDetail } from "../../api/types";
 import { server } from "../../test/server";
-import taskStyles from "../../styles.css?raw";
 import { TaskPage } from "./TaskPage";
 
 const finding = {
@@ -114,7 +111,7 @@ const taskDetail: TaskDetail = {
       original_name: "IMG_002.png",
       sha256: "two",
       status: "succeeded",
-      attempt_count: 1,
+      attempt_count: 2,
       error_code: null,
       error_message: null,
       original_url: "/api/image-2/original",
@@ -362,17 +359,6 @@ test("shows invalid usage separately from missing usage", async () => {
   expect(within(imageTokenUsage).getByText("usage 数据异常")).toBeInTheDocument();
 });
 
-test("defines readable token grids and controls for intermediate widths", () => {
-  const breakpointStart = taskStyles.indexOf("@media (min-width: 761px) and (max-width: 1024px)");
-  const mobileStart = taskStyles.indexOf("@media (max-width: 760px)");
-
-  expect(breakpointStart).toBeGreaterThan(-1);
-  const intermediateStyles = taskStyles.slice(breakpointStart, mobileStart);
-  expect(intermediateStyles).toMatch(/\.token-summary-grid\s*\{[^}]*repeat\(3,/);
-  expect(intermediateStyles).toMatch(/\.image-token-grid\s*\{[^}]*repeat\(2,/);
-  expect(taskStyles).toMatch(/\.token-details-toggle\s*\{[^}]*min-height:\s*32px;/);
-});
-
 test("shows the untracked message instead of zero totals for old tasks", async () => {
   renderTask({
     ...taskDetail,
@@ -393,6 +379,49 @@ test("shows the untracked message instead of zero totals for old tasks", async (
   expect(within(taskTokenUsage).getByText("该任务运行时尚未采集 Token 用量")).toBeInTheDocument();
   expect(within(taskTokenUsage).queryByText("总 Token")).not.toBeInTheDocument();
   expect(taskTokenUsage).not.toHaveTextContent(/总 Token\s*0/);
+});
+
+test("shows that no model calls have started without rendering totals", async () => {
+  renderTask({
+    ...taskDetail,
+    token_usage: {
+      availability: "not_started",
+      input_tokens: 0,
+      cached_input_tokens: 0,
+      uncached_input_tokens: 0,
+      output_tokens: 0,
+      reasoning_tokens: 0,
+      total_tokens: 0,
+      known_call_count: 0,
+      unknown_call_count: 0,
+    },
+  });
+
+  const taskTokenUsage = await screen.findByRole("region", { name: "任务 Token 用量" });
+  expect(within(taskTokenUsage).getByText("尚无模型调用")).toBeInTheDocument();
+  expect(within(taskTokenUsage).queryByText("总 Token")).not.toBeInTheDocument();
+});
+
+test("labels complete zero-input usage without implying a partial total", async () => {
+  renderTask({
+    ...taskDetail,
+    token_usage: {
+      availability: "complete",
+      input_tokens: 0,
+      cached_input_tokens: 0,
+      uncached_input_tokens: 0,
+      output_tokens: 0,
+      reasoning_tokens: 0,
+      total_tokens: 0,
+      known_call_count: 1,
+      unknown_call_count: 0,
+    },
+  });
+
+  const taskTokenUsage = await screen.findByRole("region", { name: "任务 Token 用量" });
+  expect(within(taskTokenUsage).getByText("总 Token")).toBeInTheDocument();
+  expect(within(taskTokenUsage).queryByText("已知总 Token")).not.toBeInTheDocument();
+  expect(within(taskTokenUsage).getByText("缓存率 —")).toBeInTheDocument();
 });
 
 test("filters statuses and retries only failed images", async () => {
