@@ -83,7 +83,10 @@ test("shows newest tasks first with status and result counts", async () => {
   expect(within(rows[1]).getByText("晚班巡检")).toBeInTheDocument();
   expect(within(rows[1]).getByText("等待确认")).toBeInTheDocument();
   expect(within(rows[1]).getByText("4 / 2 / 0 / 1")).toBeInTheDocument();
+  expect(within(rows[1]).getByText("已知 1,284 Token")).toBeInTheDocument();
+  expect(within(rows[1]).getByText("1 次未知")).toBeInTheDocument();
   expect(within(rows[2]).getByText("早班巡检")).toBeInTheDocument();
+  expect(within(rows[2]).getByText("未采集")).toBeInTheDocument();
 });
 
 test("links back to task detail and opens a completed Feishu report safely", async () => {

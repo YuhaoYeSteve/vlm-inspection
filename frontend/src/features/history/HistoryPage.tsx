@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 
 import { ApiError, api } from "../../api/client";
 import type { TaskStatus, TaskSummary } from "../../api/types";
+import { formatTokens } from "../tasks/TokenUsageSummary";
 
 const statusLabels: Record<TaskStatus, string> = {
   draft: "草稿",
@@ -24,6 +25,30 @@ function formatTime(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
+}
+
+function TokenUsageCell({ task }: { task: TaskSummary }) {
+  if (task.token_usage.availability === "not_started") {
+    return <span className="report-state">尚无调用</span>;
+  }
+  if (task.token_usage.availability === "untracked") {
+    return <span className="report-state">未采集</span>;
+  }
+  if (task.token_usage.availability === "unavailable") {
+    return <span className="report-state">用量未知</span>;
+  }
+
+  return (
+    <span className="history-token-usage">
+      <strong>
+        {task.token_usage.availability === "partial" ? "已知 " : ""}
+        {formatTokens(task.token_usage.total_tokens)} Token
+      </strong>
+      {task.token_usage.unknown_call_count > 0 && (
+        <small>{task.token_usage.unknown_call_count} 次未知</small>
+      )}
+    </span>
+  );
 }
 
 function ReportCell({ task, retrying, onRetry }: {
@@ -127,6 +152,7 @@ export function HistoryPage() {
                 <th>模板 / 模型</th>
                 <th>状态</th>
                 <th>合格 / 不合格 / 无法判断 / 执行失败</th>
+                <th>Token 用量</th>
                 <th>飞书报告</th>
                 <th><span className="visually-hidden">操作</span></th>
               </tr>
@@ -151,6 +177,9 @@ export function HistoryPage() {
                     <span className="count-sequence">
                       {task.counts.pass} / {task.counts.fail} / {task.counts.unverifiable} / {task.counts.failed}
                     </span>
+                  </td>
+                  <td>
+                    <TokenUsageCell task={task} />
                   </td>
                   <td>
                     <ReportCell

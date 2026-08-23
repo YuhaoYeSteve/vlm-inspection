@@ -1602,7 +1602,7 @@ textarea:focus-visible {
 
 .history-table {
   width: 100%;
-  min-width: 980px;
+  min-width: 1100px;
   border-collapse: collapse;
 }
 
@@ -1682,6 +1682,23 @@ textarea:focus-visible {
 .report-state {
   color: var(--ink-muted);
   font-size: 11px;
+}
+
+.history-token-usage strong,
+.history-token-usage small {
+  display: block;
+  white-space: nowrap;
+}
+
+.history-token-usage strong {
+  font-family: "SF Mono", "JetBrains Mono", monospace;
+  font-size: 11px;
+}
+
+.history-token-usage small {
+  margin-top: 4px;
+  color: var(--warning);
+  font-size: 9px;
 }
 
 .report-running {
