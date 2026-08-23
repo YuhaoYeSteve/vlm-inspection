@@ -711,12 +711,12 @@ rows = list(tables[0].iter("tr"))
 assert len(rows) == 2, len(rows)
 headers = list(rows[0])
 assert headers[0].attrib.get("rowspan") == "2", headers[0].attrib
-assert [("".join(cell.itertext()), cell.attrib.get("colspan")) for cell in headers[1:]] == [
+assert [("".join(cell.itertext()), cell.attrib.get("colspan", "1")) for cell in headers[1:]] == [
     ("安保", "2"), ("工程人员", "1"), ("客房", "3"), ("前厅", "6")
 ]
 result_cells = list(rows[1].findall("td"))
 assert len(result_cells) == 12, len(result_cells)
-verdicts = ["".join(span.itertext()) for span in rows[1].iter("span")]
+verdicts = ["".join(node.itertext()) for node in rows[1].iter("b")]
 assert verdicts.count("合格") == 10, verdicts
 assert verdicts.count("不合格") == 2, verdicts
 assert len([heading for heading in headings if "｜" in heading]) == 12, headings
