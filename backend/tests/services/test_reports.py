@@ -9,7 +9,7 @@ import pytest
 from app.core.db import Base, make_engine, make_session_factory
 from app.domain.results import Finding, FindingStatus, InspectionResult, Verdict
 from app.domain.states import ImageStatus, TaskStatus
-from app.repositories import SettingsRepository, TaskRepository
+from app.repositories import TaskRepository
 from app.services.feishu_client import BlockRef, DocumentRef, FeishuClient
 from app.services.reports import ReportBuilder
 
@@ -112,10 +112,6 @@ def report_fixture(tmp_path: Path) -> ReportFixture:
     Base.metadata.create_all(engine)
     sessions = make_session_factory(engine)
     with sessions() as session:
-        SettingsRepository(session).set(
-            "feishu",
-            {"app_id": "cli_example", "folder_token": "folder-1"},
-        )
         repo = TaskRepository(session)
         task = repo.create_task(
             "report task",
@@ -152,7 +148,12 @@ def report_fixture(tmp_path: Path) -> ReportFixture:
         repo.set_task_status(task.id, TaskStatus.EXPORTING)
         session.commit()
     feishu = FakeFeishuClient()
-    return ReportFixture(ReportBuilder(sessions, feishu), task.id, feishu, sessions)
+    return ReportFixture(
+        ReportBuilder(sessions, feishu, folder_token="folder-1"),
+        task.id,
+        feishu,
+        sessions,
+    )
 
 
 def test_report_projection_matches_result_counts(report_fixture) -> None:

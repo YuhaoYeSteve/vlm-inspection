@@ -12,10 +12,11 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.domain.results import InspectionResult
 from app.domain.states import ReportStatus, TaskStatus
 from app.models import ReportExport
-from app.repositories import SettingsRepository, TaskRepository
+from app.repositories import TaskRepository
 from app.services.events import TaskEventBroker
 from app.services.feishu_client import FeishuApiError, FeishuClientProtocol
-from app.services.feishu_oauth import FeishuOAuthProtocol, FeishuReauthorizationRequired
+from app.services.feishu_oauth import FeishuReauthorizationRequired
+from app.services.lark_cli import FeishuConnectionProviderProtocol
 
 
 @dataclass(frozen=True)
@@ -54,9 +55,11 @@ class ReportBuilder:
         self,
         sessions: sessionmaker[Session],
         feishu: FeishuClientProtocol,
+        folder_token: str = "",
     ) -> None:
         self.sessions = sessions
         self.feishu = feishu
+        self.folder_token = folder_token
 
     def project(self, task_id: str) -> ReportProjection:
         with self.sessions() as session:
@@ -289,9 +292,9 @@ class ReportBuilder:
         ]
 
     def _folder_token(self) -> str:
-        with self.sessions() as session:
-            settings = SettingsRepository(session).get("feishu") or {}
-            return str(settings.get("folder_token", ""))
+        if not self.folder_token:
+            raise ReportNotReady("Feishu report destination is not configured")
+        return self.folder_token
 
     def _get_export(self, export_id: str) -> ReportExport:
         with self.sessions() as session:
@@ -356,23 +359,23 @@ class ReportCoordinator:
     def __init__(
         self,
         builder: ReportBuilder,
-        oauth: FeishuOAuthProtocol,
+        connection_provider: FeishuConnectionProviderProtocol,
         events: TaskEventBroker,
     ) -> None:
         self.builder = builder
-        self.oauth = oauth
+        self.connection_provider = connection_provider
         self.events = events
         self._active: dict[str, asyncio.Task[None]] = {}
 
-    def is_ready(self) -> bool:
+    async def is_ready(self) -> bool:
         try:
-            configured, connected, _expires_at = self.oauth.connection_status()
+            status = await self.connection_provider.status()
         except RuntimeError:
             return False
-        return configured and connected
+        return status.configured and status.connected
 
     async def enqueue_auto(self, task_id: str) -> str | None:
-        if not self.is_ready():
+        if not await self.is_ready():
             return None
         return await self.enqueue(task_id)
 
@@ -382,7 +385,7 @@ class ReportCoordinator:
         include_failures: bool = False,
         new_version: bool = False,
     ) -> str:
-        if not self.is_ready():
+        if not await self.is_ready():
             raise ReportNotReady("Feishu authorization is not ready")
         projection = self.builder.project(task_id)
         if projection.counts["failed"] and not include_failures:

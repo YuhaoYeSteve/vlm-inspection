@@ -10,7 +10,6 @@ def read_tree(root: Path) -> bytes:
 def test_secrets_exist_only_in_secret_store(app_harness) -> None:
     ark_secret = "ARK_SENTINEL_SECRET"
     feishu_secret = "FEISHU_SENTINEL_SECRET"
-    token_secret = "TOKEN_SENTINEL_SECRET"
 
     ark_response = app_harness.client.put(
         "/api/settings/ark",
@@ -33,9 +32,7 @@ def test_secrets_exist_only_in_secret_store(app_harness) -> None:
             "folder_token": "folder-public-value",
         },
     )
-    app_harness.secrets.set("feishu_access_token", token_secret)
-    app_harness.secrets.set("feishu_refresh_token", "refresh-public-test")
-    app_harness.secrets.set("feishu_access_token_expires_at", "4102444800")
+    assert feishu_response.status_code == 405
     status_response = app_harness.client.get("/api/auth/feishu/status")
     api_responses = b"".join(
         response.content
@@ -44,7 +41,6 @@ def test_secrets_exist_only_in_secret_store(app_harness) -> None:
             feishu_response,
             status_response,
             app_harness.client.get("/api/settings/ark"),
-            app_harness.client.get("/api/settings/feishu"),
             app_harness.client.get("/api/tasks"),
         )
     )
@@ -57,6 +53,7 @@ def test_secrets_exist_only_in_secret_store(app_harness) -> None:
     logs = read_tree(app_harness.database_path.parent / "data" / "logs")
     inspected = database_files + logs + api_responses
 
-    for sentinel in (ark_secret, feishu_secret, token_secret):
+    for sentinel in (ark_secret, feishu_secret):
         assert sentinel.encode() not in inspected
-        assert sentinel in app_harness.secrets.values.values()
+    assert ark_secret in app_harness.secrets.values.values()
+    assert feishu_secret not in app_harness.secrets.values.values()

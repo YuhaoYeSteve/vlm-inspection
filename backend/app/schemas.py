@@ -35,29 +35,17 @@ class ArkTestResult(BaseModel):
     latency_ms: int
 
 
-class FeishuSettingsWrite(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    app_id: str = Field(min_length=1)
-    app_secret: SecretStr | None = None
-    folder_token: str = ""
-
-
-class FeishuSettingsRead(BaseModel):
-    app_id: str
-    folder_token: str
-    callback_url: str
-    app_secret_configured: bool
-
-
-class FeishuAuthorizationStart(BaseModel):
-    authorization_url: str
-
-
 class FeishuAuthStatus(BaseModel):
     configured: bool
     connected: bool
-    expires_at: int | None
+    user_name: str | None
+    app_name: str | None
+    identity: str | None
+    token_status: str | None
+    expires_at: datetime | None
+    destination_path: str
+    reference_url: str
+    error_code: str | None
 
 
 class TemplateRule(BaseModel):

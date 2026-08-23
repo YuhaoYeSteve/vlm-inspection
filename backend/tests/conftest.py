@@ -1,10 +1,10 @@
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 
-import httpx
 import pytest
 from PIL import Image
 from starlette.testclient import TestClient
@@ -15,6 +15,7 @@ from app.domain.results import Finding, FindingStatus, InspectionResult, Verdict
 from app.main import create_app
 from app.services.ark import ArkRuntimeConfig
 from app.services.feishu_client import BlockRef, DocumentRef
+from app.services.lark_cli import FeishuConnection
 
 
 @dataclass
@@ -37,7 +38,7 @@ class AppHarness:
     database_path: Path
     secrets: FakeSecretStore
     inspector: "FakeInspectionService"
-    feishu_http: "FakeFeishuHttp"
+    feishu_connection: "FakeFeishuConnectionProvider"
     feishu_client: "FakeReportFeishuClient"
 
     @property
@@ -89,21 +90,23 @@ class FakeInspectionService:
 
 
 @dataclass
-class FakeFeishuHttp:
-    posts: list[dict] = field(default_factory=list)
-
-    async def post(self, url: str, **kwargs):
-        self.posts.append({"url": url, **kwargs})
-        return httpx.Response(
-            200,
-            json={
-                "access_token": "access-api",
-                "refresh_token": "refresh-api",
-                "expires_in": 7200,
-                "refresh_token_expires_in": 2_592_000,
-            },
-            request=httpx.Request("POST", url),
+class FakeFeishuConnectionProvider:
+    connection: FeishuConnection = field(
+        default_factory=lambda: FeishuConnection(
+            configured=True,
+            connected=True,
+            user_name="测试用户",
+            app_name="示例应用",
+            identity="user",
+            token_status="valid",
+            expires_at=datetime(2030, 1, 1, tzinfo=UTC),
+            destination_path="测试报告目录",
+            reference_url="https://example.feishu.cn/docx/reference",
         )
+    )
+
+    async def status(self) -> FeishuConnection:
+        return self.connection
 
 
 @dataclass
@@ -157,15 +160,20 @@ def app_harness(tmp_path: Path) -> Iterator[AppHarness]:
     Base.metadata.create_all(engine)
     secrets = FakeSecretStore()
     inspector = FakeInspectionService()
-    feishu_http = FakeFeishuHttp()
+    feishu_connection = FakeFeishuConnectionProvider()
     feishu_client = FakeReportFeishuClient()
     with TestClient(
         create_app(
-            settings=Settings(data_dir=tmp_path / "data"),
+            settings=Settings(
+                data_dir=tmp_path / "data",
+                feishu_reference_url="https://example.feishu.cn/docx/reference",
+                feishu_parent_token="folder-test",
+                feishu_parent_label="测试报告目录",
+            ),
             engine=engine,
             secret_store=secrets,
             inspection_service=inspector,
-            feishu_http_client=feishu_http,
+            feishu_connection_provider=feishu_connection,
             feishu_client=feishu_client,
         )
     ) as client:
@@ -174,7 +182,7 @@ def app_harness(tmp_path: Path) -> Iterator[AppHarness]:
             database_path=database_path,
             secrets=secrets,
             inspector=inspector,
-            feishu_http=feishu_http,
+            feishu_connection=feishu_connection,
             feishu_client=feishu_client,
         )
 

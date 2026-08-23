@@ -37,27 +37,6 @@ def test_save_ark_settings_masks_secret(app_harness) -> None:
     assert "ark-secret-value" not in saved.text
 
 
-def test_save_feishu_settings_masks_secret(app_harness) -> None:
-    response = app_harness.client.put(
-        "/api/settings/feishu",
-        json={
-            "app_id": "cli_example",
-            "app_secret": "feishu-secret-value",
-            "folder_token": "folder-1",
-        },
-    )
-
-    assert response.status_code == 200
-    assert response.json() == {
-        "app_id": "cli_example",
-        "folder_token": "folder-1",
-        "callback_url": "http://127.0.0.1:8000/api/auth/feishu/callback",
-        "app_secret_configured": True,
-    }
-    assert "feishu-secret-value" not in response.text
-    assert app_harness.secrets.get("feishu_app_secret") == "feishu-secret-value"
-
-
 @dataclass
 class UnavailableSecretStore:
     def get(self, key: str) -> str | None:
@@ -137,3 +116,12 @@ def test_ark_connection_uses_real_vision_adapter_path(app_harness) -> None:
     assert response.json()["latency_ms"] >= 0
     assert app_harness.inspector.call_count == 1
     assert "connection-test-secret" not in response.text
+
+
+def test_feishu_credentials_cannot_be_written_through_settings(app_harness) -> None:
+    response = app_harness.client.put(
+        "/api/settings/feishu",
+        json={"app_id": "cli", "app_secret": "secret", "folder_token": "folder"},
+    )
+
+    assert response.status_code == 405

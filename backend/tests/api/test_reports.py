@@ -16,18 +16,6 @@ def configure_services(app_harness) -> None:
         },
     )
     assert ark.status_code == 200
-    feishu = app_harness.client.put(
-        "/api/settings/feishu",
-        json={
-            "app_id": "cli_example",
-            "app_secret": "app-secret",
-            "folder_token": "folder-1",
-        },
-    )
-    assert feishu.status_code == 200
-    app_harness.secrets.set("feishu_access_token", "access")
-    app_harness.secrets.set("feishu_refresh_token", "refresh")
-    app_harness.secrets.set("feishu_access_token_expires_at", str(int(time.time()) + 7200))
 
 
 def create_uploaded_task(app_harness, png_file) -> tuple[str, str]:

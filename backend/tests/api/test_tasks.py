@@ -53,7 +53,7 @@ def test_create_upload_start_and_fetch_results(app_harness, png_file) -> None:
     assert len(uploaded.json()["accepted"]) == 1
     assert app_harness.client.post(f"/api/tasks/{task_id}/start").status_code == 202
 
-    detail = wait_for_status(app_harness, task_id, {TaskStatus.EXPORTING})
+    detail = wait_for_status(app_harness, task_id, {TaskStatus.COMPLETED})
     assert detail["counts"]["pass"] == 1
     assert detail["counts"]["failed"] == 0
     assert detail["images"][0]["result"]["verdict"] == "pass"
@@ -111,7 +111,7 @@ def test_failed_image_can_retry_after_configuration_is_fixed(app_harness, png_fi
     retry = app_harness.client.post(f"/api/tasks/{task_id}/images/{image_id}/retry")
 
     assert retry.status_code == 202
-    completed = wait_for_status(app_harness, task_id, {TaskStatus.EXPORTING})
+    completed = wait_for_status(app_harness, task_id, {TaskStatus.COMPLETED})
     assert completed["counts"]["pass"] == 1
 
 

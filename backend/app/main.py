@@ -18,8 +18,15 @@ from app.core.secrets import KeyringSecretStore, SecretStoreProtocol
 from app.repositories import TaskRepository
 from app.services.ark import InspectionServiceProtocol, KeychainArkInspectionService
 from app.services.events import TaskEventBroker
-from app.services.feishu_client import FeishuClient, FeishuClientProtocol
-from app.services.feishu_oauth import AsyncHttpClientProtocol, FeishuOAuthService
+from app.services.feishu_client import FeishuClientProtocol
+from app.services.lark_cli import (
+    FeishuConnectionProviderProtocol,
+    FeishuDestination,
+    LarkCliCommandRunner,
+    LarkCliConnectionProvider,
+    LarkCliFeishuClient,
+    LarkCliRunnerProtocol,
+)
 from app.services.reports import ReportBuilder, ReportCoordinator
 from app.services.runner import TaskRunner
 
@@ -29,7 +36,8 @@ def create_app(
     engine: Engine | None = None,
     secret_store: SecretStoreProtocol | None = None,
     inspection_service: InspectionServiceProtocol | None = None,
-    feishu_http_client: AsyncHttpClientProtocol | None = None,
+    lark_cli_runner: LarkCliRunnerProtocol | None = None,
+    feishu_connection_provider: FeishuConnectionProviderProtocol | None = None,
     feishu_client: FeishuClientProtocol | None = None,
     frontend_dist: Path | None = None,
 ) -> FastAPI:
@@ -43,14 +51,29 @@ def create_app(
         resolved_secret_store
     )
     events = TaskEventBroker()
-    feishu_oauth = FeishuOAuthService(
-        sessions,
-        resolved_secret_store,
-        http=feishu_http_client,
+    destination = FeishuDestination(
+        parent_token=resolved_settings.feishu_parent_token,
+        path=resolved_settings.feishu_parent_label,
+        reference_url=resolved_settings.feishu_reference_url,
     )
-    resolved_feishu_client = feishu_client or FeishuClient(feishu_oauth)
-    report_builder = ReportBuilder(sessions, resolved_feishu_client)
-    report_coordinator = ReportCoordinator(report_builder, feishu_oauth, events)
+    resolved_lark_runner = lark_cli_runner or LarkCliCommandRunner(
+        resolved_settings.lark_cli_path
+    )
+    resolved_connection_provider = (
+        feishu_connection_provider
+        or LarkCliConnectionProvider(resolved_lark_runner, destination)
+    )
+    resolved_feishu_client = feishu_client or LarkCliFeishuClient(resolved_lark_runner)
+    report_builder = ReportBuilder(
+        sessions,
+        resolved_feishu_client,
+        folder_token=destination.parent_token,
+    )
+    report_coordinator = ReportCoordinator(
+        report_builder,
+        resolved_connection_provider,
+        events,
+    )
     runner = TaskRunner(
         sessions,
         resolved_inspection_service,
@@ -78,7 +101,7 @@ def create_app(
     app.state.inspection_service = inspection_service
     app.state.event_broker = events
     app.state.runner = runner
-    app.state.feishu_oauth = feishu_oauth
+    app.state.feishu_connection_provider = resolved_connection_provider
     app.state.report_coordinator = report_coordinator
 
     @app.exception_handler(ApiError)
