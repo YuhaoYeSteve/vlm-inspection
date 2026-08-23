@@ -256,7 +256,7 @@ async def test_report_renders_partial_usage_as_known_only(report_fixture) -> Non
     assert projection.token_usage.total_tokens == 36
     body = report_fixture.feishu.values[-1][0]
     assert body.splitlines()[0] == "已知总 Token：36"
-    assert "未返回或未采集 usage：至少 1 次；不计入已知总量。" in body
+    assert "未返回、格式异常或未采集 usage：至少 1 次；不计入已知总量。" in body
     assert "总 Token：0" not in body
 
 

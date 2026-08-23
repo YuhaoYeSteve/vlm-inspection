@@ -104,10 +104,10 @@ def _token_usage_text(token_usage: TokenUsageSummary) -> str:
             )
         return "\n".join(lines)
     if token_usage.availability is UsageAvailability.UNAVAILABLE:
-        lines = ["方舟未返回可用的 Token 用量。"]
+        lines = ["没有可用的 Token 用量（未返回或格式异常）。"]
         if token_usage.unknown_call_count > 0:
             lines.append(
-                "未返回 usage：至少 "
+                "未返回或格式异常 usage：至少 "
                 f"{_format_tokens(token_usage.unknown_call_count)} 次。"
             )
         return "\n".join(lines)
@@ -128,7 +128,7 @@ def _token_usage_text(token_usage: TokenUsageSummary) -> str:
     ]
     if token_usage.unknown_call_count > 0:
         lines.append(
-            "未返回或未采集 usage：至少 "
+            "未返回、格式异常或未采集 usage：至少 "
             f"{_format_tokens(token_usage.unknown_call_count)} "
             "次；不计入已知总量。"
         )

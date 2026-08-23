@@ -287,7 +287,7 @@ def test_render_report_sheet_formats_partial_usage_and_unknown_disclaimer() -> N
         "输出：234\n"
         "推理 Token：34（包含在输出中）\n"
         "已知调用：1\n"
-        "未返回或未采集 usage：至少 2 次；不计入已知总量。"
+        "未返回、格式异常或未采集 usage：至少 2 次；不计入已知总量。"
     )
     assert "raw_usage" not in layout.values[-1][0]
     assert "费用" not in layout.values[-1][0]
@@ -308,7 +308,8 @@ def test_render_report_sheet_formats_partial_usage_and_unknown_disclaimer() -> N
         ),
         pytest.param(
             empty_usage(UsageAvailability.UNAVAILABLE, unknown_call_count=2),
-            "方舟未返回可用的 Token 用量。\n未返回 usage：至少 2 次。",
+            "没有可用的 Token 用量（未返回或格式异常）。\n"
+            "未返回或格式异常 usage：至少 2 次。",
             id="unavailable",
         ),
     ],
