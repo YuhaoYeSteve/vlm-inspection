@@ -300,8 +300,14 @@ async def test_report_creates_docx_table_and_places_matching_images(report_fixtu
     assert "巡检项" in rendered
     assert "巡检图片" in rendered
     assert "巡检结果" in rendered
+    assert "模型完整输出" in rendered
     assert "不合格<br/>result-2" in rendered
     assert "无法判断<br/>image is obscured" in rendered
+    assert "检查项 1：badge｜不合格" in rendered
+    assert "观察：</b>result-2" in rendered
+    assert "视觉证据：</b>visible-result-2" in rendered
+    assert "图片有效性：</b>无效" in rendered
+    assert "不可判断原因：</b>image is obscured" in rendered
     assert "总 Token：36" in rendered
     assert "raw_usage" not in rendered
     assert "费用" not in rendered

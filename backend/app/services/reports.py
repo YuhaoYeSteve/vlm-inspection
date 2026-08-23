@@ -18,6 +18,7 @@ from app.services.feishu_client import FeishuClientProtocol
 from app.services.feishu_oauth import FeishuReauthorizationRequired
 from app.services.lark_cli import FeishuConnectionProviderProtocol
 from app.services.report_document import (
+    DocumentFinding,
     DocumentImagePlacement,
     DocumentItem,
     parse_image_cell_ids,
@@ -219,10 +220,24 @@ class ReportBuilder:
             image_path=Path(item.thumbnail_path),
             verdict=result.verdict.value if result is not None else "failed",
             summary=result.summary if result is not None else "",
+            image_valid=result.image_valid if result is not None else None,
             unverifiable_reason=(
                 result.unverifiable_reason if result is not None else None
             ),
             execution_status=item.execution_status,
+            findings=(
+                tuple(
+                    DocumentFinding(
+                        rule_name=finding.rule_name,
+                        status=finding.status.value,
+                        observation=finding.observation,
+                        visual_evidence=finding.visual_evidence,
+                    )
+                    for finding in result.findings
+                )
+                if result is not None
+                else ()
+            ),
         )
 
     async def _ensure_image_cells(
