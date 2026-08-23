@@ -69,6 +69,14 @@ class DeterministicFeishuClient:
         del document_id, parent_block_id, blocks
         return [BlockRef(f"block-{operation_key}")]
 
+    async def append_document_xml(
+        self,
+        document_id: str,
+        content: str,
+        operation_key: str,
+    ) -> None:
+        del document_id, content, operation_key
+
     async def create_image_block(
         self,
         document_id: str,

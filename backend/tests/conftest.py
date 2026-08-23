@@ -137,6 +137,15 @@ class FakeReportFeishuClient:
         self.calls.append(operation_key)
         return [BlockRef(f"block-{len(self.calls)}")]
 
+    async def append_document_xml(
+        self,
+        document_id: str,
+        content: str,
+        operation_key: str,
+    ) -> None:
+        del document_id, content
+        self.calls.append(operation_key)
+
     async def create_image_block(
         self,
         document_id: str,

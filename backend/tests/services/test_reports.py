@@ -23,6 +23,7 @@ class FakeFeishuClient:
         self.duplicate_operation_keys: list[str] = []
         self.calls: list[tuple[str, str]] = []
         self.block_payloads: list[dict] = []
+        self.xml_payloads: list[str] = []
 
     def _operation(self, kind: str, key: str) -> None:
         self.operation_count += 1
@@ -55,6 +56,16 @@ class FakeFeishuClient:
         self.block_payloads.extend(blocks)
         self._operation("blocks", operation_key)
         return [BlockRef(f"block-{self.operation_count}")]
+
+    async def append_document_xml(
+        self,
+        document_id: str,
+        content: str,
+        operation_key: str,
+    ) -> None:
+        del document_id
+        self.xml_payloads.append(content)
+        self._operation("xml", operation_key)
 
     async def create_image_block(
         self,
@@ -122,8 +133,14 @@ def report_fixture(tmp_path: Path) -> ReportFixture:
             },
             {"model": "seed"},
         )
-        for position, verdict in enumerate(
-            (Verdict.PASS, Verdict.FAIL, Verdict.UNVERIFIABLE),
+        filenames = (
+            "行02_D列_安保_01.png",
+            "行02_E列_安保_02.png",
+            "行02_F列_前厅_01.png",
+        )
+        verdicts = (Verdict.PASS, Verdict.FAIL, Verdict.UNVERIFIABLE)
+        for position, (filename, verdict) in enumerate(
+            zip(filenames, verdicts, strict=True),
             start=1,
         ):
             thumbnail = tmp_path / f"{position:03}.jpg"
@@ -131,7 +148,7 @@ def report_fixture(tmp_path: Path) -> ReportFixture:
             image = repo.add_image(
                 task.id,
                 position - 1,
-                f"{position:03}.png",
+                filename,
                 f"hash-{position}",
                 str(thumbnail),
                 str(thumbnail),
@@ -165,7 +182,11 @@ def test_report_projection_matches_result_counts(report_fixture) -> None:
         "unverifiable": 1,
         "failed": 0,
     }
-    assert [item.filename for item in projection.items] == ["001.png", "002.png", "003.png"]
+    assert [item.filename for item in projection.items] == [
+        "行02_D列_安保_01.png",
+        "行02_E列_安保_02.png",
+        "行02_F列_前厅_01.png",
+    ]
 
 
 @pytest.mark.asyncio
@@ -174,6 +195,33 @@ async def test_report_does_not_render_model_confidence(report_fixture) -> None:
 
     rendered = json.dumps(report_fixture.feishu.block_payloads, ensure_ascii=False)
     assert "置信度" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_report_places_grouped_matrix_before_details(report_fixture) -> None:
+    await report_fixture.builder.export(report_fixture.task_id)
+
+    assert len(report_fixture.feishu.xml_payloads) == 1
+    matrix = report_fixture.feishu.xml_payloads[0]
+    assert "巡检结果总览" in matrix
+    assert "安保" in matrix
+    assert "合格" in matrix and "不合格" in matrix and "无法判断" in matrix
+    assert report_fixture.feishu.calls[1] == ("blocks", "overview")
+    assert report_fixture.feishu.calls[2] == ("xml", "matrix")
+
+
+@pytest.mark.asyncio
+async def test_report_retry_does_not_append_matrix_twice(report_fixture) -> None:
+    report_fixture.feishu.fail_after_operations = 5
+    first = await report_fixture.builder.export(report_fixture.task_id)
+    report_fixture.feishu.fail_after_operations = None
+    second = await report_fixture.builder.export(report_fixture.task_id)
+
+    assert first.status == "failed"
+    assert second.status == "succeeded"
+    assert [call for call in report_fixture.feishu.calls if call == ("xml", "matrix")] == [
+        ("xml", "matrix")
+    ]
 
 
 @pytest.mark.asyncio

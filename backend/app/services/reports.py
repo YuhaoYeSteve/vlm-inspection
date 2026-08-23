@@ -17,11 +17,13 @@ from app.services.events import TaskEventBroker
 from app.services.feishu_client import FeishuApiError, FeishuClientProtocol
 from app.services.feishu_oauth import FeishuReauthorizationRequired
 from app.services.lark_cli import FeishuConnectionProviderProtocol
+from app.services.report_matrix import MatrixItem, detail_heading, render_result_matrix
 
 
 @dataclass(frozen=True)
 class ReportItem:
     image_id: str
+    position: int
     filename: str
     thumbnail_path: str
     execution_status: str
@@ -89,6 +91,7 @@ class ReportBuilder:
                 items.append(
                     ReportItem(
                         image_id=image.id,
+                        position=image.position,
                         filename=image.original_name,
                         thumbnail_path=image.thumbnail_path,
                         execution_status=image.status,
@@ -174,6 +177,18 @@ class ReportBuilder:
             "overview",
             self._overview_blocks(projection),
         )
+        matrix_items = tuple(
+            MatrixItem(
+                item.filename,
+                item.result.verdict.value if item.result is not None else "failed",
+            )
+            for item in projection.items
+        )
+        await self._write_xml(
+            export,
+            "matrix",
+            render_result_matrix(matrix_items),
+        )
         for item in projection.items:
             await self._write_blocks(
                 export,
@@ -197,6 +212,22 @@ class ReportBuilder:
             export.document_id,
             export.document_id,
             blocks,
+            operation_key,
+        )
+        self._mark_operation_completed(export.id, operation_key)
+
+    async def _write_xml(
+        self,
+        export: ReportExport,
+        operation_key: str,
+        content: str,
+    ) -> None:
+        if self._operation_completed(export.id, operation_key):
+            return
+        assert export.document_id is not None
+        await self.feishu.append_document_xml(
+            export.document_id,
+            content,
             operation_key,
         )
         self._mark_operation_completed(export.id, operation_key)
@@ -263,7 +294,13 @@ class ReportBuilder:
         ]
 
     def _item_blocks(self, item: ReportItem) -> list[dict[str, Any]]:
-        blocks = [self._text_block(item.filename, heading=True)]
+        verdict = item.result.verdict.value if item.result is not None else "failed"
+        blocks = [
+            self._text_block(
+                detail_heading(item.filename, verdict, item.position),
+                heading=True,
+            )
+        ]
         if item.result is None:
             blocks.append(self._text_block(f"执行失败：{item.execution_status}"))
             return blocks
