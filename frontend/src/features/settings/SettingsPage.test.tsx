@@ -104,7 +104,8 @@ test("renders Feishu account and destination without credential inputs", async (
   expect(await screen.findByText("测试用户")).toBeInTheDocument();
   expect(screen.getByText("示例应用")).toBeInTheDocument();
   expect(screen.getByText(feishuStatus.destination_path)).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: /打开参考文档/ })).toHaveAttribute(
+  expect(screen.getByText("使用你的身份创建电子表格并回填巡检图片。")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: /打开参考表格/ })).toHaveAttribute(
     "href",
     feishuStatus.reference_url,
   );

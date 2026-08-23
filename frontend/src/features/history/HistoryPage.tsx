@@ -63,9 +63,9 @@ function ReportCell({ task, retrying, onRetry }: {
         href={task.report_url}
         target="_blank"
         rel="noreferrer"
-        aria-label={`打开${task.name}飞书文档`}
+        aria-label={`打开${task.name}飞书表格`}
       >
-        打开文档
+        打开表格
         <ArrowSquareOut size={14} weight="bold" aria-hidden="true" />
       </a>
     );

@@ -215,7 +215,7 @@ export function SettingsPage() {
               <span className="icon-tile"><LinkSimple size={22} weight="bold" /></span>
               <div>
                 <h2 id="feishu-heading">飞书报告</h2>
-                <p>使用你的身份创建文档和上传缩略图。</p>
+                <p>使用你的身份创建电子表格并回填巡检图片。</p>
               </div>
             </div>
             <div className="connection-status">
@@ -259,7 +259,7 @@ export function SettingsPage() {
                   target="_blank"
                   rel="noreferrer"
                 >
-                  打开参考文档 <ArrowSquareOut size={16} />
+                  打开参考表格 <ArrowSquareOut size={16} />
                 </a>
               )}
             </div>

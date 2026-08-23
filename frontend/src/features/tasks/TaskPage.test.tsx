@@ -477,6 +477,19 @@ test("asks for confirmation before exporting failed items", async () => {
   await waitFor(() => expect(includeFailures).toBe(true));
 });
 
+test("opens a generated report as a Feishu spreadsheet", async () => {
+  renderTask({
+    ...taskDetail,
+    status: "completed",
+    report_id: "report-1",
+    report_status: "succeeded",
+    report_url: "https://example.feishu.cn/sheets/report-1",
+  });
+
+  const link = await screen.findByRole("link", { name: "打开飞书表格" });
+  expect(link).toHaveAttribute("href", "https://example.feishu.cn/sheets/report-1");
+});
+
 test("refetches authoritative state after an SSE terminal event", async () => {
   let fetchCount = 0;
   server.use(
