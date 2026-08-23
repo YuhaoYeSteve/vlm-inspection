@@ -175,6 +175,7 @@ def app_harness(tmp_path: Path) -> Iterator[AppHarness]:
             inspection_service=inspector,
             feishu_connection_provider=feishu_connection,
             feishu_client=feishu_client,
+            frontend_dist=tmp_path / "frontend-dist",
         )
     ) as client:
         yield AppHarness(

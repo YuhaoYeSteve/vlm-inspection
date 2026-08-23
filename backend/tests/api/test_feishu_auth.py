@@ -18,4 +18,4 @@ def test_feishu_status_exposes_conversation_identity_and_destination(app_harness
 
 def test_legacy_web_oauth_routes_are_not_exposed(app_harness) -> None:
     assert app_harness.client.get("/api/auth/feishu/start").status_code == 404
-    assert app_harness.client.delete("/api/auth/feishu/disconnect").status_code == 405
+    assert app_harness.client.delete("/api/auth/feishu/disconnect").status_code == 404

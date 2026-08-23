@@ -32,7 +32,7 @@ def test_secrets_exist_only_in_secret_store(app_harness) -> None:
             "folder_token": "folder-public-value",
         },
     )
-    assert feishu_response.status_code == 405
+    assert feishu_response.status_code == 404
     status_response = app_harness.client.get("/api/auth/feishu/status")
     api_responses = b"".join(
         response.content

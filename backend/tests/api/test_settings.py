@@ -124,4 +124,4 @@ def test_feishu_credentials_cannot_be_written_through_settings(app_harness) -> N
         json={"app_id": "cli", "app_secret": "secret", "folder_token": "folder"},
     )
 
-    assert response.status_code == 405
+    assert response.status_code == 404
