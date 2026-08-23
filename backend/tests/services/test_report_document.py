@@ -135,20 +135,20 @@ def test_render_report_document_formats_untracked_usage() -> None:
     assert "未采集 usage：至少 12 次。" in layout.xml
 
 
-def test_parse_image_cell_ids_reads_all_report_bands_in_order() -> None:
+def test_parse_image_cell_anchor_ids_reads_all_report_bands_in_order() -> None:
     fetched_xml = """
     <document>
       <table id="table-1">
         <thead><tr><th id="a1"><p>巡检项</p></th><th id="b1"><p>安保</p></th></tr></thead>
         <tbody>
-          <tr><td id="a2"><p>巡检图片</p></td><td id="cell-b"><p></p></td><td id="cell-c"><p></p></td></tr>
+          <tr><td><p id="label-1">巡检图片</p></td><td><p id="anchor-b"></p></td><td><p id="anchor-c"></p></td></tr>
           <tr><td id="a3"><p>巡检结果</p></td><td id="b3"><p>合格</p></td><td id="c3"><p>不合格</p></td></tr>
         </tbody>
       </table>
       <table id="table-2">
         <thead><tr><th id="a4"><p>巡检项</p></th><th id="b4"><p>前厅</p></th></tr></thead>
         <tbody>
-          <tr><td id="a5"><p>巡检图片</p></td><td id="cell-d"><p></p></td></tr>
+          <tr><td><p id="label-2">巡检图片</p></td><td><p id="anchor-d"></p></td></tr>
           <tr><td id="a6"><p>巡检结果</p></td><td id="b6"><p>合格</p></td></tr>
         </tbody>
       </table>
@@ -156,16 +156,16 @@ def test_parse_image_cell_ids_reads_all_report_bands_in_order() -> None:
     """
 
     assert parse_image_cell_ids(fetched_xml, expected_count=3) == (
-        "cell-b",
-        "cell-c",
-        "cell-d",
+        "anchor-b",
+        "anchor-c",
+        "anchor-d",
     )
 
 
 def test_parse_image_cell_ids_rejects_incomplete_mapping() -> None:
     fetched_xml = """
     <document><table><tbody>
-      <tr><td><p>巡检图片</p></td><td id="cell-b"><p></p></td></tr>
+      <tr><td><p>巡检图片</p></td><td><p id="anchor-b"></p></td></tr>
     </tbody></table></document>
     """
 

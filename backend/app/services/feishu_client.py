@@ -43,3 +43,10 @@ class FeishuClientProtocol(Protocol):
         filename: str,
         content: bytes,
     ) -> str: ...
+
+    async def move_document_block(
+        self,
+        document_id: str,
+        anchor_block_id: str,
+        source_block_id: str,
+    ) -> None: ...

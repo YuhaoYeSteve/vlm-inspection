@@ -338,6 +338,35 @@ class LarkCliFeishuClient:
             raise LarkCliCommandError("lark_cli_invalid_response")
         return token
 
+    async def move_document_block(
+        self,
+        document_id: str,
+        anchor_block_id: str,
+        source_block_id: str,
+    ) -> None:
+        payload = await self.runner.run(
+            [
+                "docs",
+                "+update",
+                "--doc",
+                document_id,
+                "--command",
+                "block_move_after",
+                "--block-id",
+                anchor_block_id,
+                "--src-block-ids",
+                source_block_id,
+                "--as",
+                "user",
+                "--format",
+                "json",
+            ],
+            timeout=60,
+        )
+        data = self._command_data(payload)
+        if data.get("result") != "success":
+            raise LarkCliCommandError("lark_cli_invalid_response")
+
     @staticmethod
     def _command_data(payload: dict[str, Any]) -> dict[str, Any]:
         if payload.get("ok") is not True:

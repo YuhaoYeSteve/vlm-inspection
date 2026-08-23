@@ -4,7 +4,7 @@
 
 **Goal:** Generate each new inspection report as a native Feishu Docx containing the grouped image/result table instead of as a standalone spreadsheet.
 
-**Architecture:** A pure renderer produces Docx XML and later parses table-cell block IDs from a `docs +fetch --detail with-ids` response. The report coordinator persists the document, layout, cell mapping, image-block IDs, and upload checkpoints so retries reuse remote objects. `LarkCliFeishuClient` combines idempotent OpenAPI document/block creation with `lark-cli docs` XML append/fetch and Drive media upload.
+**Architecture:** A pure renderer produces Docx XML and later parses empty paragraph anchors inside image-row cells from a `docs +fetch --detail with-ids` response. The report coordinator persists the document, layout, anchor mapping, image-block IDs, and upload checkpoints so retries reuse remote objects. `LarkCliFeishuClient` combines idempotent OpenAPI document/block creation with `lark-cli docs` XML append/fetch/block movement and Drive media upload.
 
 **Tech Stack:** Python 3.12, FastAPI, SQLAlchemy, lark-cli, Feishu Docx OpenAPI, React, Vitest, pytest.
 
@@ -68,7 +68,7 @@ class DocumentLayout:
     images: tuple[DocumentImagePlacement, ...]
 ```
 
-Use `html.escape`, `MAX_IMAGES_PER_BAND = 12`, the existing filename department regex, `<colgroup>`, `<th colspan>`, and empty image-row `<td><p></p></td>` cells. Parse fetched XML with `xml.etree.ElementTree`, select tables whose first-column labels are `巡检项 / 巡检图片 / 巡检结果`, collect image-row `td.attrib["id"]` excluding the label cell, and raise `ValueError` unless the count equals `expected_count`.
+Use `html.escape`, `MAX_IMAGES_PER_BAND = 12`, the existing filename department regex, `<colgroup>`, `<th colspan>`, and empty image-row `<td><p></p></td>` cells. Parse fetched XML with `xml.etree.ElementTree`, select rows whose first-column label is `巡检图片`, collect the empty paragraph block ID in each remaining cell, and raise `ValueError` unless the count equals `expected_count`.
 
 - [ ] **Step 4: Run renderer tests and verify GREEN**
 
@@ -98,11 +98,12 @@ Test these protocol operations and exact argv/payloads:
 document = await client.create_document("巡检报告", "folder-1", "export-1")
 await client.append_document_xml(document.id, "<table></table>", "layout")
 xml = await client.fetch_document_xml(document.id)
-block = await client.create_image_block(document.id, "cell-b", "doc-image:image-1")
+block = await client.create_image_block(document.id, document.id, "doc-image:image-1")
 await client.upload_docx_image(block.id, "原图.jpg", b"jpeg")
+await client.move_document_block(document.id, "anchor-b", block.id)
 ```
 
-Assert document creation uses `/open-apis/docx/v1/documents` with a stable hashed `client_token`; append uses `docs +update ... append`; fetch uses `docs +fetch --detail with-ids`; image block creation targets the table-cell block; media upload uses `parent_type=docx_image` and the image block ID.
+Assert document creation uses `/open-apis/docx/v1/documents` with a stable hashed `client_token`; append uses `docs +update ... append`; fetch uses `docs +fetch --detail with-ids`; image block creation targets the document root; media upload uses `parent_type=docx_image`; and `block_move_after` moves the uploaded block behind the target cell anchor.
 
 - [ ] **Step 2: Run the focused tests and verify RED**
 
@@ -125,7 +126,7 @@ class BlockRef:
     id: str
 ```
 
-Expose `create_document`, `append_document_xml`, `fetch_document_xml`, `create_image_block`, and `upload_docx_image`. Restore `_api()` and `_client_token()` so document and image-block creation remain idempotent. Set required connection scopes to:
+Expose `create_document`, `append_document_xml`, `fetch_document_xml`, `create_image_block`, `upload_docx_image`, and `move_document_block`. Restore `_api()` and `_client_token()` so document and image-block creation remain idempotent. Set required connection scopes to:
 
 ```python
 REQUIRED_REPORT_SCOPES = frozenset({
@@ -196,7 +197,7 @@ await self._ensure_image_cells(export, layout)
 await self._write_document_images(export, layout.images)
 ```
 
-`_ensure_image_cells` fetches the document once when mappings are absent, parses IDs, and persists `doc-cell:<image_id>`. `_write_document_images` uses a semaphore of 4, creates/reuses `doc-image-block:<image_id>`, uploads to that block, and records `doc-image:<image_id>` only after upload succeeds.
+`_ensure_image_cells` fetches the document once when mappings are absent, parses paragraph anchors, and persists `doc-cell:<image_id>`. `_write_document_images` uses a semaphore of 4, creates/reuses `doc-image-block:<image_id>` at the document root, uploads to that block, moves it after the matching anchor, and records `doc-image:<image_id>` only after the move succeeds.
 
 Keep `save_export_document`; remove spreadsheet-only layout constants and persistence helpers once no callers remain.
 

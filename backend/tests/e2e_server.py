@@ -85,7 +85,7 @@ class DeterministicFeishuClient:
             '<td vertical-align="middle"><p></p></td>'
         )
         cells = "".join(
-            f'<td id="cell-{index}"><p></p></td>'
+            f'<td><p id="anchor-{index}"></p></td>'
             for index in range(image_count)
         )
         return f"<table><tbody><tr><td><p>巡检图片</p></td>{cells}</tr></tbody></table>"
@@ -107,6 +107,14 @@ class DeterministicFeishuClient:
     ) -> str:
         del filename, content
         return f"token-{block_id}"
+
+    async def move_document_block(
+        self,
+        document_id: str,
+        anchor_block_id: str,
+        source_block_id: str,
+    ) -> None:
+        del document_id, anchor_block_id, source_block_id
 
 
 class DeterministicFeishuConnectionProvider:

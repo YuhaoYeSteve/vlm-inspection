@@ -222,6 +222,16 @@ def _cell_text(cell: ET.Element) -> str:
     return "".join(cell.itertext()).strip()
 
 
+def _cell_anchor_id(cell: ET.Element) -> str | None:
+    for descendant in cell.iter():
+        if descendant is cell:
+            continue
+        block_id = descendant.attrib.get("id")
+        if block_id:
+            return block_id
+    return cell.attrib.get("id")
+
+
 def parse_image_cell_ids(content: str, expected_count: int) -> tuple[str, ...]:
     if expected_count < 0:
         raise ValueError("expected_count must not be negative")
@@ -243,7 +253,7 @@ def parse_image_cell_ids(content: str, expected_count: int) -> tuple[str, ...]:
             cell_ids.extend(
                 cell_id
                 for cell in cells[1:]
-                if (cell_id := cell.attrib.get("id"))
+                if (cell_id := _cell_anchor_id(cell))
             )
 
     if len(cell_ids) != expected_count:

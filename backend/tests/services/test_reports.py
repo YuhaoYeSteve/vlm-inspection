@@ -28,6 +28,7 @@ class FakeFeishuClient:
         self.appended_xml: list[str] = []
         self.fetch_count = 0
         self.image_parent_ids: list[str] = []
+        self.move_calls: list[tuple[str, str]] = []
         self.image_calls: list[ImageCall] = []
         self.block_attempts: Counter[str] = Counter()
         self.upload_attempts: Counter[str] = Counter()
@@ -69,7 +70,7 @@ class FakeFeishuClient:
         <table id="table-1">
           <thead><tr><th id="a1"><p>巡检项</p></th><th id="b1"><p>安保</p></th><th id="d1"><p>前厅</p></th></tr></thead>
           <tbody>
-            <tr><td id="a2"><p>巡检图片</p></td><td id="cell-b"><p></p></td><td id="cell-c"><p></p></td><td id="cell-d"><p></p></td></tr>
+            <tr><td><p id="label-a">巡检图片</p></td><td><p id="anchor-b"></p></td><td><p id="anchor-c"></p></td><td><p id="anchor-d"></p></td></tr>
             <tr><td id="a3"><p>巡检结果</p></td><td id="b3"><p>合格</p></td><td id="c3"><p>不合格</p></td><td id="d3"><p>无法判断</p></td></tr>
           </tbody>
         </table>
@@ -84,7 +85,7 @@ class FakeFeishuClient:
         assert document_id.startswith("document-")
         self.block_attempts[operation_key] += 1
         self.image_parent_ids.append(parent_block_id)
-        return BlockRef(f"image-{parent_block_id}")
+        return BlockRef(f"image-{operation_key.rsplit(':', 1)[-1]}")
 
     async def upload_docx_image(
         self,
@@ -104,6 +105,15 @@ class FakeFeishuClient:
             return f"token-{block_id}"
         finally:
             self.active_uploads -= 1
+
+    async def move_document_block(
+        self,
+        document_id: str,
+        anchor_block_id: str,
+        source_block_id: str,
+    ) -> None:
+        assert document_id.startswith("document-")
+        self.move_calls.append((anchor_block_id, source_block_id))
 
 
 @dataclass
@@ -244,15 +254,15 @@ async def test_report_creates_docx_table_and_places_matching_images(report_fixtu
     assert "总 Token：36" in rendered
     assert "raw_usage" not in rendered
     assert "费用" not in rendered
-    assert set(report_fixture.feishu.image_parent_ids) == {
-        "cell-b",
-        "cell-c",
-        "cell-d",
+    assert report_fixture.feishu.image_parent_ids == ["document-1"] * 3
+    assert {anchor for anchor, _block in report_fixture.feishu.move_calls} == {
+        "anchor-b",
+        "anchor-c",
+        "anchor-d",
     }
     assert {call.block_id for call in report_fixture.feishu.image_calls} == {
-        "image-cell-b",
-        "image-cell-c",
-        "image-cell-d",
+        f"image-{item.image_id}"
+        for item in report_fixture.builder.project(report_fixture.task_id).items
     }
     assert all(call.content.startswith(b"thumbnail-") for call in report_fixture.feishu.image_calls)
 
@@ -280,7 +290,12 @@ async def test_report_renders_partial_usage_as_known_only(report_fixture) -> Non
 
 @pytest.mark.asyncio
 async def test_retry_reuses_document_blocks_and_skips_completed_images(report_fixture) -> None:
-    report_fixture.feishu.fail_blocks.add("image-cell-c")
+    image_ids = [
+        item.image_id
+        for item in report_fixture.builder.project(report_fixture.task_id).items
+    ]
+    failed_block = f"image-{image_ids[1]}"
+    report_fixture.feishu.fail_blocks.add(failed_block)
 
     first = await report_fixture.builder.export(report_fixture.task_id)
     report_fixture.feishu.fail_blocks.clear()
@@ -294,7 +309,11 @@ async def test_retry_reuses_document_blocks_and_skips_completed_images(report_fi
     assert report_fixture.feishu.fetch_count == 1
     assert set(report_fixture.feishu.block_attempts.values()) == {1}
     assert report_fixture.feishu.upload_attempts == Counter(
-        {"image-cell-c": 2, "image-cell-b": 1, "image-cell-d": 1}
+        {
+            failed_block: 2,
+            f"image-{image_ids[0]}": 1,
+            f"image-{image_ids[2]}": 1,
+        }
     )
 
 

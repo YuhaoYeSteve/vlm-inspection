@@ -158,7 +158,7 @@ class FakeReportFeishuClient:
             '<td vertical-align="middle"><p></p></td>'
         )
         cells = "".join(
-            f'<td id="cell-{index}"><p></p></td>'
+            f'<td><p id="anchor-{index}"></p></td>'
             for index in range(image_count)
         )
         return (
@@ -187,6 +187,15 @@ class FakeReportFeishuClient:
         del filename, content
         self.calls.append(f"upload_image:{block_id}")
         return f"token-{block_id}"
+
+    async def move_document_block(
+        self,
+        document_id: str,
+        anchor_block_id: str,
+        source_block_id: str,
+    ) -> None:
+        del document_id
+        self.calls.append(f"move_image:{source_block_id}:{anchor_block_id}")
 
 
 @pytest.fixture

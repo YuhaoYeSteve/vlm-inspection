@@ -288,7 +288,7 @@ async def test_report_client_appends_and_fetches_document_xml() -> None:
 
 
 @pytest.mark.asyncio
-async def test_report_client_creates_and_uploads_image_inside_table_cell() -> None:
+async def test_report_client_creates_uploads_and_moves_image_to_table_cell() -> None:
     runner = QueueRunner(
         [
             {
@@ -301,16 +301,22 @@ async def test_report_client_creates_and_uploads_image_inside_table_cell() -> No
                 "identity": "user",
                 "data": {"file_token": "file-token-1"},
             },
+            {
+                "ok": True,
+                "identity": "user",
+                "data": {"result": "success", "document": {"revision_id": 4}},
+            },
         ]
     )
     client = LarkCliFeishuClient(runner)
 
     block = await client.create_image_block(
         "document-1",
-        "cell-b",
+        "document-1",
         "doc-image-block:image-1",
     )
     token = await client.upload_docx_image(block.id, "原图.jpg", b"jpeg")
+    await client.move_document_block("document-1", "anchor-b", block.id)
 
     assert block == BlockRef("image-block-1")
     assert token == "file-token-1"
@@ -318,7 +324,7 @@ async def test_report_client_creates_and_uploads_image_inside_table_cell() -> No
     assert create_call["args"][:3] == [
         "api",
         "POST",
-        "/open-apis/docx/v1/documents/document-1/blocks/cell-b/children",
+        "/open-apis/docx/v1/documents/document-1/blocks/document-1/children",
     ]
     create_params = json.loads(
         create_call["args"][create_call["args"].index("--params") + 1]
@@ -345,6 +351,22 @@ async def test_report_client_creates_and_uploads_image_inside_table_cell() -> No
     }
     assert upload_call["stdin"] == b"jpeg"
     assert upload_call["timeout"] == 90
+    assert runner.calls[2]["args"] == [
+        "docs",
+        "+update",
+        "--doc",
+        "document-1",
+        "--command",
+        "block_move_after",
+        "--block-id",
+        "anchor-b",
+        "--src-block-ids",
+        "image-block-1",
+        "--as",
+        "user",
+        "--format",
+        "json",
+    ]
 
 
 @pytest.mark.asyncio

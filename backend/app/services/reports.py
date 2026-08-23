@@ -201,12 +201,12 @@ class ReportBuilder:
             )
             self._mark_operation_completed(export.id, REPORT_LAYOUT_OPERATION)
             export = self._get_export(export.id)
-        image_cells = await self._ensure_image_cells(export, layout.images)
+        image_anchors = await self._ensure_image_cells(export, layout.images)
         await self._write_document_images(
             export,
             document_id,
             layout.images,
-            image_cells,
+            image_anchors,
         )
         self._mark_succeeded(export.id)
 
@@ -255,7 +255,7 @@ class ReportBuilder:
         export: ReportExport,
         document_id: str,
         placements: tuple[DocumentImagePlacement, ...],
-        image_cells: dict[str, str],
+        image_anchors: dict[str, str],
     ) -> None:
         pending = [
             placement
@@ -272,7 +272,7 @@ class ReportBuilder:
                 if block_id is None:
                     block = await self.feishu.create_image_block(
                         document_id,
-                        image_cells[placement.image_id],
+                        document_id,
                         block_key,
                     )
                     block_id = block.id
@@ -281,6 +281,11 @@ class ReportBuilder:
                     block_id,
                     placement.filename,
                     placement.path.read_bytes(),
+                )
+                await self.feishu.move_document_block(
+                    document_id,
+                    image_anchors[placement.image_id],
+                    block_id,
                 )
             async with ledger_lock:
                 self._mark_operation_completed(export.id, placement.operation_key)
