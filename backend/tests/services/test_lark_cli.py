@@ -1,3 +1,4 @@
+import json
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -5,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from app.services.feishu_client import SpreadsheetRef
 from app.services.lark_cli import (
     FeishuDestination,
     LarkCliCommandError,
@@ -68,8 +70,8 @@ async def test_connection_provider_projects_ready_user_and_destination() -> None
                     "tokenStatus": "valid",
                     "expiresAt": "2026-08-24T01:25:08+08:00",
                     "scope": (
-                        "docx:document:create docx:document:write_only "
-                        "drive:file:upload offline_access"
+                        "sheets:spreadsheet:create sheets:spreadsheet:write_only "
+                        "sheets:spreadsheet:read drive:file:upload offline_access"
                     ),
                 },
             },
@@ -108,7 +110,7 @@ async def test_connection_provider_reports_missing_scope_without_throwing() -> N
                     "userName": "测试用户",
                     "tokenStatus": "valid",
                     "expiresAt": None,
-                    "scope": "docx:document:create",
+                    "scope": "sheets:spreadsheet:read drive:file:upload",
                 },
             },
         }
@@ -148,8 +150,8 @@ async def test_connection_provider_rechecks_status_after_cli_refreshes_token() -
         "userName": "测试用户",
         "expiresAt": "2026-08-23T12:57:16+08:00",
         "scope": (
-            "docx:document:create docx:document:write_only "
-            "drive:file:upload offline_access"
+            "sheets:spreadsheet:create sheets:spreadsheet:write_only "
+            "sheets:spreadsheet:read drive:file:upload offline_access"
         ),
     }
     runner = QueueRunner(
@@ -185,86 +187,156 @@ async def test_connection_provider_rechecks_status_after_cli_refreshes_token() -
 
 
 @pytest.mark.asyncio
-async def test_report_client_creates_document_with_user_identity() -> None:
+async def test_report_client_creates_spreadsheet_with_values_styles_and_sheet_id() -> None:
     runner = QueueRunner(
         [
             {
                 "ok": True,
                 "identity": "user",
                 "data": {
-                    "document": {
-                        "document_id": "doc-1",
-                        "url": "https://example.feishu.cn/docx/doc-1",
-                    }
+                    "spreadsheet": {
+                        "spreadsheet_token": "spreadsheet-1",
+                        "url": "https://example.feishu.cn/sheets/spreadsheet-1",
+                    },
+                    "sheets": [{"sheet_id": "sheet-1", "title": "Sheet1"}],
                 },
             }
         ]
     )
     client = LarkCliFeishuClient(runner)
+    values = [["巡检项", "安保"], ["巡检图片", ""]]
+    styles = {
+        "styles": [
+            {
+                "name": "Sheet1",
+                "cell_styles": [{"range": "A1:B1", "font_weight": "bold"}],
+            }
+        ]
+    }
 
-    document = await client.create_document("巡检报告", "folder-1", "export-1")
+    spreadsheet = await client.create_spreadsheet(
+        "巡检报告",
+        "folder-1",
+        values,
+        styles,
+    )
 
-    assert document.id == "doc-1"
-    call = runner.calls[0]["args"]
-    assert call[:4] == ["api", "POST", "/open-apis/docx/v1/documents", "--as"]
-    assert call[4] == "user"
-    assert any("folder-1" in argument for argument in call)
+    assert spreadsheet == SpreadsheetRef(
+        "spreadsheet-1",
+        "https://example.feishu.cn/sheets/spreadsheet-1",
+        "sheet-1",
+    )
+    call = runner.calls[0]
+    assert call["args"][:3] == ["sheets", "+workbook-create", "--title"]
+    assert call["args"][3] == "巡检报告"
+    assert call["args"][4:6] == ["--folder-token", "folder-1"]
+    assert call["args"][call["args"].index("--values") + 1] == "-"
+    assert json.loads(call["stdin"].decode()) == values
+    styles_arg = call["args"][call["args"].index("--styles") + 1]
+    assert json.loads(styles_arg) == styles
+    assert call["timeout"] == 90
 
 
 @pytest.mark.asyncio
-async def test_report_client_uploads_image_bytes_through_stdin() -> None:
+async def test_report_client_fetches_first_sheet_when_create_response_omits_it() -> None:
     runner = QueueRunner(
-        [{"ok": True, "identity": "user", "data": {"file_token": "file-1"}}]
+        [
+            {
+                "ok": True,
+                "identity": "user",
+                "data": {
+                    "spreadsheet_token": "spreadsheet-1",
+                    "url": "https://example.feishu.cn/sheets/spreadsheet-1",
+                },
+            },
+            {
+                "ok": True,
+                "identity": "user",
+                "data": {
+                    "sheets": [
+                        {"sheet_id": "embedded", "resource_type": "bitable"},
+                        {"sheet_id": "sheet-1", "resource_type": "sheet"},
+                    ]
+                },
+            },
+        ]
     )
     client = LarkCliFeishuClient(runner)
 
-    token = await client.upload_docx_image("block-1", "one.jpg", b"jpeg-bytes")
-
-    assert token == "file-1"
-    call = runner.calls[0]
-    assert call["stdin"] == b"jpeg-bytes"
-    assert "file=-" in call["args"]
-    assert any("docx_image" in argument for argument in call["args"])
-
-
-@pytest.mark.asyncio
-async def test_report_client_appends_docx_xml_through_stdin() -> None:
-    runner = QueueRunner(
-        [{"ok": True, "identity": "user", "data": {"result": "success"}}]
+    spreadsheet = await client.create_spreadsheet(
+        "巡检报告",
+        "folder-1",
+        [["巡检项"]],
+        {"styles": [{"name": "Sheet1", "row_sizes": [{"range": "1:1", "type": "auto"}]}]},
     )
-    client = LarkCliFeishuClient(runner)
 
-    await client.append_document_xml("doc-1", "<table></table>", "matrix:1")
-
-    call = runner.calls[0]
-    assert call["args"] == [
-        "docs",
-        "+update",
-        "--doc",
-        "doc-1",
-        "--command",
-        "append",
-        "--doc-format",
-        "xml",
-        "--content",
-        "-",
+    assert spreadsheet.sheet_id == "sheet-1"
+    assert runner.calls[1]["args"] == [
+        "sheets",
+        "+workbook-info",
+        "--spreadsheet-token",
+        "spreadsheet-1",
         "--as",
         "user",
         "--format",
         "json",
     ]
-    assert call["stdin"] == b"<table></table>"
 
 
 @pytest.mark.asyncio
-async def test_report_client_rejects_unsuccessful_docx_xml_update() -> None:
+async def test_report_client_uploads_cell_image_from_relative_cwd() -> None:
     runner = QueueRunner(
-        [{"ok": True, "identity": "user", "data": {"result": "failed"}}]
+        [{"ok": True, "identity": "user", "data": {"updated_cells_count": 1}}]
+    )
+    client = LarkCliFeishuClient(runner)
+    path = Path("/tmp/report images/001.jpg")
+
+    await client.set_cell_image(
+        "spreadsheet-1",
+        "sheet-1",
+        "C2",
+        path,
+        "原图.jpg",
+    )
+
+    call = runner.calls[0]
+    assert call["args"] == [
+        "sheets",
+        "+cells-set-image",
+        "--spreadsheet-token",
+        "spreadsheet-1",
+        "--sheet-id",
+        "sheet-1",
+        "--range",
+        "C2",
+        "--image",
+        "001.jpg",
+        "--name",
+        "原图.jpg",
+        "--as",
+        "user",
+        "--format",
+        "json",
+    ]
+    assert call["stdin"] is None
+    assert call["cwd"] == path.parent
+    assert call["timeout"] == 90
+
+
+@pytest.mark.asyncio
+async def test_report_client_rejects_create_response_without_spreadsheet_reference() -> None:
+    runner = QueueRunner(
+        [{"ok": True, "identity": "user", "data": {"sheets": []}}]
     )
     client = LarkCliFeishuClient(runner)
 
     with pytest.raises(LarkCliCommandError) as raised:
-        await client.append_document_xml("doc-1", "<table></table>", "matrix:1")
+        await client.create_spreadsheet(
+            "巡检报告",
+            "folder-1",
+            [["巡检项"]],
+            {"styles": [{"name": "Sheet1", "row_sizes": [{"range": "1:1", "type": "auto"}]}]},
+        )
 
     assert raised.value.code == "lark_cli_invalid_response"
 
@@ -283,6 +355,11 @@ async def test_report_client_rejects_failed_cli_envelope() -> None:
     client = LarkCliFeishuClient(runner)
 
     with pytest.raises(LarkCliCommandError) as raised:
-        await client.create_document("巡检报告", "folder-1", "export-1")
+        await client.create_spreadsheet(
+            "巡检报告",
+            "folder-1",
+            [["巡检项"]],
+            {"styles": [{"name": "Sheet1", "row_sizes": [{"range": "1:1", "type": "auto"}]}]},
+        )
 
     assert raised.value.code == "missing_scope"

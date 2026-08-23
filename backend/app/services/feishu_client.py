@@ -3,7 +3,8 @@ import hashlib
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Protocol
+from pathlib import Path
+from typing import Any, Protocol, cast
 
 import httpx
 
@@ -22,7 +23,31 @@ class BlockRef:
     id: str
 
 
+@dataclass(frozen=True)
+class SpreadsheetRef:
+    id: str
+    url: str
+    sheet_id: str
+
+
 class FeishuClientProtocol(Protocol):
+    async def create_spreadsheet(
+        self,
+        title: str,
+        folder_token: str,
+        values: list[list[str]],
+        styles: dict[str, Any],
+    ) -> SpreadsheetRef: ...
+
+    async def set_cell_image(
+        self,
+        spreadsheet_token: str,
+        sheet_id: str,
+        cell: str,
+        image_path: Path,
+        filename: str,
+    ) -> None: ...
+
     async def create_document(
         self,
         title: str,
@@ -215,7 +240,7 @@ class FeishuClient:
             payload = response.json()
             if int(payload.get("code", 0)) != 0:
                 raise FeishuApiError(str(payload.get("code", "api_error")), response.status_code)
-            return payload
+            return cast(dict[str, Any], payload)
 
     async def _send(self, method: str, url: str, **kwargs: Any) -> Any:
         if self.http is not None:

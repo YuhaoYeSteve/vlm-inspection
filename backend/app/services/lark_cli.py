@@ -6,14 +6,15 @@ import shutil
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
-from app.services.feishu_client import BlockRef, DocumentRef, FeishuApiError
+from app.services.feishu_client import BlockRef, DocumentRef, FeishuApiError, SpreadsheetRef
 
 REQUIRED_REPORT_SCOPES = frozenset(
     {
-        "docx:document:create",
-        "docx:document:write_only",
+        "sheets:spreadsheet:create",
+        "sheets:spreadsheet:write_only",
+        "sheets:spreadsheet:read",
         "drive:file:upload",
     }
 )
@@ -94,7 +95,7 @@ class LarkCliCommandRunner:
             error = payload.get("error") if isinstance(payload.get("error"), dict) else {}
             code = str(error.get("subtype") or error.get("type") or "lark_cli_failed")
             raise LarkCliCommandError(code)
-        return payload
+        return cast(dict[str, Any], payload)
 
 
 @dataclass(frozen=True)
@@ -193,6 +194,121 @@ class LarkCliConnectionProvider:
 class LarkCliFeishuClient:
     def __init__(self, runner: LarkCliRunnerProtocol) -> None:
         self.runner = runner
+
+    async def create_spreadsheet(
+        self,
+        title: str,
+        folder_token: str,
+        values: list[list[str]],
+        styles: dict[str, Any],
+    ) -> SpreadsheetRef:
+        args = [
+            "sheets",
+            "+workbook-create",
+            "--title",
+            title,
+            "--folder-token",
+            folder_token,
+            "--values",
+            "-",
+            "--styles",
+            json.dumps(styles, ensure_ascii=False, separators=(",", ":")),
+            "--as",
+            "user",
+            "--format",
+            "json",
+        ]
+        payload = await self.runner.run(
+            args,
+            stdin=json.dumps(values, ensure_ascii=False).encode("utf-8"),
+            timeout=90,
+        )
+        data = self._command_data(payload)
+        spreadsheet = data.get("spreadsheet")
+        spreadsheet_data = spreadsheet if isinstance(spreadsheet, dict) else data
+        token = spreadsheet_data.get("spreadsheet_token") or spreadsheet_data.get("token")
+        if not isinstance(token, str) or not token:
+            raise LarkCliCommandError("lark_cli_invalid_response")
+        raw_url = spreadsheet_data.get("url") or data.get("url")
+        url = str(raw_url) if raw_url else f"https://feishu.cn/sheets/{token}"
+        sheet_id = self._first_grid_sheet_id(data)
+        if sheet_id is None:
+            info_payload = await self.runner.run(
+                [
+                    "sheets",
+                    "+workbook-info",
+                    "--spreadsheet-token",
+                    token,
+                    "--as",
+                    "user",
+                    "--format",
+                    "json",
+                ],
+                timeout=30,
+            )
+            sheet_id = self._first_grid_sheet_id(self._command_data(info_payload))
+        if sheet_id is None:
+            raise LarkCliCommandError("lark_cli_invalid_response")
+        return SpreadsheetRef(token, url, sheet_id)
+
+    async def set_cell_image(
+        self,
+        spreadsheet_token: str,
+        sheet_id: str,
+        cell: str,
+        image_path: Path,
+        filename: str,
+    ) -> None:
+        payload = await self.runner.run(
+            [
+                "sheets",
+                "+cells-set-image",
+                "--spreadsheet-token",
+                spreadsheet_token,
+                "--sheet-id",
+                sheet_id,
+                "--range",
+                cell,
+                "--image",
+                image_path.name,
+                "--name",
+                filename,
+                "--as",
+                "user",
+                "--format",
+                "json",
+            ],
+            cwd=image_path.parent,
+            timeout=90,
+        )
+        self._command_data(payload)
+
+    @staticmethod
+    def _command_data(payload: dict[str, Any]) -> dict[str, Any]:
+        if payload.get("ok") is not True:
+            raw_error = payload.get("error")
+            error: dict[str, Any] = raw_error if isinstance(raw_error, dict) else {}
+            code = str(error.get("subtype") or error.get("type") or "lark_cli_failed")
+            raise LarkCliCommandError(code)
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            raise LarkCliCommandError("lark_cli_invalid_response")
+        return data
+
+    @staticmethod
+    def _first_grid_sheet_id(data: dict[str, Any]) -> str | None:
+        raw_sheets = data.get("sheets")
+        if not isinstance(raw_sheets, list):
+            return None
+        for raw_sheet in raw_sheets:
+            if not isinstance(raw_sheet, dict):
+                continue
+            if raw_sheet.get("resource_type", "sheet") != "sheet":
+                continue
+            sheet_id = raw_sheet.get("sheet_id")
+            if isinstance(sheet_id, str) and sheet_id:
+                return sheet_id
+        return None
 
     async def create_document(
         self,
