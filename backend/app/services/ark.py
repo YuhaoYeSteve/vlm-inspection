@@ -265,7 +265,7 @@ class ArkInspectionService:
     def _client(self, config: ArkRuntimeConfig) -> Any:
         if self.client is not None:
             return self.client
-        return Ark(base_url=config.base_url, api_key=self.api_key)
+        return Ark(base_url=config.base_url, api_key=self.api_key, max_retries=0)
 
     @staticmethod
     def _image_data_url(image_path: Path) -> str:

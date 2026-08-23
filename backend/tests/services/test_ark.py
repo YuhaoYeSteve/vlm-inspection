@@ -2,6 +2,7 @@ import json
 from types import SimpleNamespace
 from typing import ClassVar, TypeAlias
 
+import httpx
 import pytest
 
 from app.domain.results import Verdict
@@ -119,6 +120,36 @@ def runtime(protocol: str = "responses") -> ArkRuntimeConfig:
         timeout_seconds=120,
         max_retries=2,
     )
+
+
+def test_production_client_sends_one_http_request_per_tracked_call(tmp_path) -> None:
+    image = tmp_path / "image.jpg"
+    image.write_bytes(b"jpeg-bytes")
+    requests: list[httpx.Request] = []
+
+    def fail_request(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            500,
+            request=request,
+            json={"error": {"message": "boom", "code": "InternalError"}},
+        )
+
+    sdk_client = ArkInspectionService(api_key="test-key")._client(runtime())
+    default_http_client = sdk_client._client
+    sdk_client._client = httpx.Client(transport=httpx.MockTransport(fail_request))
+    default_http_client.close()
+    service = ArkInspectionService(client=sdk_client)
+
+    try:
+        with pytest.raises(ArkRequestError) as raised:
+            service.inspect_responses(runtime(), "system", "user", image)
+    finally:
+        sdk_client.close()
+
+    assert raised.value.usage is not None
+    assert (len(requests), len(raised.value.usage.calls)) == (1, 1)
+    assert raised.value.usage.calls[0].status == "failed"
 
 
 def test_responses_adapter_sends_one_image_and_parses_schema(tmp_path) -> None:
