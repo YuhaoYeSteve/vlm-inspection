@@ -10,6 +10,10 @@ class Settings(BaseSettings):
     data_dir: Path = Field(default_factory=lambda: Path.home() / ".vlm-inspector")
     host: str = "127.0.0.1"
     port: int = 8000
+    lark_cli_path: str = "lark-cli"
+    feishu_reference_url: str = ""
+    feishu_parent_token: str = ""
+    feishu_parent_label: str = ""
 
     @property
     def database_path(self) -> Path:
