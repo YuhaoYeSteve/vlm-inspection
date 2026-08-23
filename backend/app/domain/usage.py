@@ -16,6 +16,7 @@ ProtocolName = Literal["responses", "chat"]
 CallPurpose = Literal["inspection", "schema_fallback", "json_repair"]
 CallStatus = Literal["succeeded", "failed"]
 UsageError = Literal["not_returned", "invalid_usage"]
+MAX_TOKEN_COUNT = 2**63 - 1
 
 _RawUsageSchema = Mapping[str, frozenset[str] | None]
 _RESPONSES_RAW_USAGE_SCHEMA: dict[str, frozenset[str] | None] = {
@@ -49,11 +50,11 @@ class UsageAvailability(StrEnum):
 class TokenValues(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    input_tokens: int = Field(ge=0)
-    cached_input_tokens: int = Field(ge=0)
-    output_tokens: int = Field(ge=0)
-    reasoning_tokens: int = Field(ge=0)
-    total_tokens: int = Field(ge=0)
+    input_tokens: int = Field(ge=0, le=MAX_TOKEN_COUNT)
+    cached_input_tokens: int = Field(ge=0, le=MAX_TOKEN_COUNT)
+    output_tokens: int = Field(ge=0, le=MAX_TOKEN_COUNT)
+    reasoning_tokens: int = Field(ge=0, le=MAX_TOKEN_COUNT)
+    total_tokens: int = Field(ge=0, le=MAX_TOKEN_COUNT)
 
     @model_validator(mode="after")
     def validate_relationships(self) -> Self:
@@ -209,7 +210,7 @@ def _safe_raw_number(value: Any) -> bool:
     if isinstance(value, bool):
         return False
     if isinstance(value, int):
-        return True
+        return -(MAX_TOKEN_COUNT + 1) <= value <= MAX_TOKEN_COUNT
     return isinstance(value, float) and math.isfinite(value)
 
 
@@ -238,8 +239,12 @@ def _project_raw_usage(value: Any, schema: _RawUsageSchema) -> dict[str, Any]:
 
 
 def _required_int(value: Any) -> int:
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise TypeError("usage value is not an integer")
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 0 <= value <= MAX_TOKEN_COUNT
+    ):
+        raise TypeError("usage value is not an in-range non-negative integer")
     return cast(int, value)
 
 

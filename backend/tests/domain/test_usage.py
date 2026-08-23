@@ -1,8 +1,10 @@
+import json
 from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
 
+import app.domain.usage as usage_domain
 from app.domain.usage import (
     AttemptUsageCollector,
     AttemptUsageTrace,
@@ -14,6 +16,8 @@ from app.domain.usage import (
     parse_attempt_trace,
     summarize_attempt_payloads,
 )
+
+SIGNED_INT64_MAX = 2**63 - 1
 
 RESPONSES_USAGE = {
     "input_tokens": 58,
@@ -309,6 +313,87 @@ def test_non_finite_float_is_not_persisted(value: float) -> None:
     assert call.usage_error == "invalid_usage"
     assert call.raw_usage is not None
     assert "input_tokens" not in call.raw_usage
+
+
+def test_max_token_count_is_signed_int64_max() -> None:
+    assert usage_domain.MAX_TOKEN_COUNT == SIGNED_INT64_MAX
+
+
+@pytest.mark.parametrize(
+    ("protocol", "raw_usage", "expected_raw"),
+    [
+        pytest.param(
+            "responses",
+            {
+                "input_tokens": 10**5000,
+                "input_tokens_details": {"cached_tokens": 0},
+                "output_tokens": 0,
+                "output_tokens_details": {"reasoning_tokens": 0},
+                "total_tokens": 10**5000,
+            },
+            {
+                "input_tokens_details": {"cached_tokens": 0},
+                "output_tokens": 0,
+                "output_tokens_details": {"reasoning_tokens": 0},
+            },
+            id="responses",
+        ),
+        pytest.param(
+            "chat",
+            {
+                "prompt_tokens": 10**5000,
+                "prompt_tokens_details": {"cached_tokens": 0},
+                "completion_tokens": 0,
+                "completion_tokens_details": {"reasoning_tokens": 0},
+                "total_tokens": 10**5000,
+            },
+            {
+                "prompt_tokens_details": {"cached_tokens": 0},
+                "completion_tokens": 0,
+                "completion_tokens_details": {"reasoning_tokens": 0},
+            },
+            id="chat",
+        ),
+    ],
+)
+def test_excessive_token_counts_are_excluded_from_raw_and_totals(
+    protocol: ProtocolName,
+    raw_usage: dict[str, object],
+    expected_raw: dict[str, object],
+) -> None:
+    call = normalize_provider_call(
+        protocol=protocol,
+        sequence=1,
+        purpose="inspection",
+        status="succeeded",
+        raw_usage=raw_usage,
+    )
+    trace = AttemptUsageTrace.from_calls(protocol, [call])
+
+    assert call.usage_available is False
+    assert call.usage_error == "invalid_usage"
+    assert call.raw_usage == expected_raw
+    assert trace.totals.known_call_count == 0
+    assert trace.totals.unknown_call_count == 1
+    assert trace.totals.total_tokens == 0
+    json.dumps(trace.model_dump(mode="json"))
+
+
+def test_direct_available_call_rejects_token_count_above_signed_int64() -> None:
+    with pytest.raises(ValidationError):
+        TokenUsageCall(
+            sequence=1,
+            purpose="inspection",
+            status="succeeded",
+            usage_available=True,
+            usage_error=None,
+            input_tokens=SIGNED_INT64_MAX + 1,
+            cached_input_tokens=0,
+            output_tokens=0,
+            reasoning_tokens=0,
+            total_tokens=SIGNED_INT64_MAX + 1,
+            raw_usage=None,
+        )
 
 
 def test_invalid_string_token_is_not_persisted_but_numeric_context_is() -> None:
