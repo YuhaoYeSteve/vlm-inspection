@@ -35,6 +35,7 @@ export function ImageDetail({ image, retrying, onRetry }: ImageDetailProps) {
       {image.result && <ResultPanel result={image.result} />}
 
       <TokenUsageDetails
+        key={image.id}
         imageName={image.original_name}
         usage={image.token_usage}
         calls={image.token_calls}

@@ -1027,6 +1027,11 @@ textarea:focus-visible {
 .task-metrics .metric-warning strong { color: var(--warning); }
 
 .token-summary,
+.image-token-usage {
+  --token-warning: #805817;
+}
+
+.token-summary,
 .token-empty,
 .image-token-usage {
   background: #f6f8f4;
@@ -1114,11 +1119,11 @@ textarea:focus-visible {
 .token-warning,
 .token-summary.token-empty.token-warning p,
 .image-token-usage > .token-warning {
-  color: var(--warning);
+  color: var(--token-warning, var(--warning));
 }
 
 .token-unknown {
-  color: var(--warning);
+  color: var(--token-warning, var(--warning));
   font-size: 11px;
   font-weight: 650;
 }
@@ -1381,6 +1386,9 @@ textarea:focus-visible {
 }
 
 .token-details-toggle {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
   padding: 0;
   color: var(--accent);
   background: transparent;
@@ -1427,13 +1435,36 @@ textarea:focus-visible {
   font-weight: 650;
 }
 
+.token-call-label {
+  display: block;
+}
+
+.token-call-status {
+  display: inline-flex;
+  margin-top: 5px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 750;
+}
+
+.token-call-status-succeeded {
+  color: #43583a;
+  background: var(--accent-soft);
+}
+
+.token-call-status-failed {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
 .token-call-table tbody tr:last-child th,
 .token-call-table tbody tr:last-child td {
   border-bottom: 0;
 }
 
 .token-call-table .token-call-error {
-  color: var(--warning);
+  color: var(--token-warning);
   text-align: left;
 }
 
@@ -1708,6 +1739,37 @@ textarea:focus-visible {
 @keyframes skeleton-pulse {
   from { opacity: 0.45; }
   to { opacity: 0.85; }
+}
+
+@media (min-width: 761px) and (max-width: 1024px) {
+  .token-summary-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .image-token-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .token-summary-grid > div,
+  .image-token-grid > div {
+    border-right: 1px solid #cfd9ca;
+    border-bottom: 1px solid #cfd9ca;
+  }
+
+  .token-summary-grid > div:nth-child(3n),
+  .image-token-grid > div:nth-child(2n),
+  .image-token-grid > div:last-child {
+    border-right: 0;
+  }
+
+  .token-summary-grid > div:nth-last-child(-n + 3) {
+    border-bottom: 0;
+  }
+
+  .image-token-grid > div:last-child {
+    grid-column: 1 / -1;
+    border-bottom: 0;
+  }
 }
 
 @media (max-width: 760px) {

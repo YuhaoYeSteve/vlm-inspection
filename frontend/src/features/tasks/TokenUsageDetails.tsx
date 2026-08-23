@@ -15,6 +15,11 @@ const purposeLabels: Record<TokenUsageCall["purpose"], string> = {
   json_repair: "JSON 修复",
 };
 
+const statusLabels: Record<TokenUsageCall["status"], string> = {
+  succeeded: "成功",
+  failed: "失败",
+};
+
 function emptyMessage(usage: TokenUsageSummary) {
   if (usage.availability === "not_started") return "尚无模型调用";
   if (usage.availability === "untracked") return "该图片运行时尚未采集 Token 用量";
@@ -97,7 +102,14 @@ export function TokenUsageDetails({ imageName, usage, calls }: TokenUsageDetails
             <tbody>
               {calls.map((call) => (
                 <tr key={`${call.attempt_number}-${call.sequence}`}>
-                  <th scope="row">尝试 {call.attempt_number} · {purposeLabels[call.purpose]}</th>
+                  <th scope="row">
+                    <span className="token-call-label">
+                      尝试 {call.attempt_number} · {purposeLabels[call.purpose]}
+                    </span>
+                    <span className={`token-call-status token-call-status-${call.status}`}>
+                      {statusLabels[call.status]}
+                    </span>
+                  </th>
                   {call.total_tokens === null ? (
                     <td colSpan={5} className="token-call-error">
                       {call.usage_error === "invalid_usage" ? "usage 数据异常" : "方舟未返回 usage"}

@@ -1,3 +1,5 @@
+/// <reference types="vite/client" />
+
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -7,6 +9,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { TaskDetail } from "../../api/types";
 import { server } from "../../test/server";
+import taskStyles from "../../styles.css?raw";
 import { TaskPage } from "./TaskPage";
 
 const finding = {
@@ -279,6 +282,95 @@ test("shows task totals and expands every call for selected image", async () => 
   expect(within(imageTokenUsage).getByText("尝试 1 · 初始检查")).toBeInTheDocument();
   expect(within(imageTokenUsage).getByText("尝试 1 · JSON 修复")).toBeInTheDocument();
   expect(within(imageTokenUsage).getByText("方舟未返回 usage")).toBeInTheDocument();
+});
+
+test("distinguishes succeeded and failed calls with the same missing usage error", async () => {
+  const user = userEvent.setup();
+  const image = taskDetail.images[1];
+  const missingUsageCall = image.token_calls[2];
+  const detail: TaskDetail = {
+    ...taskDetail,
+    token_usage: { ...taskDetail.token_usage, unknown_call_count: 3 },
+    images: taskDetail.images.map((candidate) => candidate.id === image.id
+      ? {
+          ...candidate,
+          token_usage: { ...candidate.token_usage, unknown_call_count: 2 },
+          token_calls: [
+            ...candidate.token_calls,
+            {
+              ...missingUsageCall,
+              sequence: 2,
+              purpose: "schema_fallback",
+              status: "succeeded",
+            },
+          ],
+        }
+      : candidate),
+  };
+  renderTask(detail);
+
+  await screen.findByText("IMG_001.png");
+  await user.click(screen.getByRole("button", { name: "查看 IMG_002.png" }));
+  const imageTokenUsage = screen.getByRole("region", { name: "IMG_002.png Token 用量" });
+  await user.click(within(imageTokenUsage).getByRole("button", { name: "展开调用明细" }));
+
+  expect(within(imageTokenUsage).getByRole("row", {
+    name: /尝试 2 · 初始检查.*失败.*方舟未返回 usage/,
+  })).toBeInTheDocument();
+  expect(within(imageTokenUsage).getByRole("row", {
+    name: /尝试 2 · Schema 降级.*成功.*方舟未返回 usage/,
+  })).toBeInTheDocument();
+});
+
+test("collapses call details when selecting a different image", async () => {
+  const user = userEvent.setup();
+  renderTask();
+
+  await screen.findByText("IMG_001.png");
+  await user.click(screen.getByRole("button", { name: "查看 IMG_002.png" }));
+  const selectedUsage = screen.getByRole("region", { name: "IMG_002.png Token 用量" });
+  await user.click(within(selectedUsage).getByRole("button", { name: "展开调用明细" }));
+  expect(within(selectedUsage).getByRole("button", { name: "收起调用明细" })).toHaveAttribute("aria-expanded", "true");
+
+  await user.click(screen.getByRole("button", { name: "查看 IMG_001.png" }));
+  const nextUsage = screen.getByRole("region", { name: "IMG_001.png Token 用量" });
+  expect(within(nextUsage).getByRole("button", { name: "展开调用明细" })).toHaveAttribute("aria-expanded", "false");
+  expect(within(nextUsage).queryByRole("table")).not.toBeInTheDocument();
+});
+
+test("shows invalid usage separately from missing usage", async () => {
+  const user = userEvent.setup();
+  const detail: TaskDetail = {
+    ...taskDetail,
+    images: taskDetail.images.map((image) => image.id === "image-3"
+      ? {
+          ...image,
+          token_calls: image.token_calls.map((call) => ({
+            ...call,
+            usage_error: "invalid_usage",
+          })),
+        }
+      : image),
+  };
+  renderTask(detail);
+
+  await screen.findByText("IMG_001.png");
+  await user.click(screen.getByRole("button", { name: "查看 IMG_003.png" }));
+  const imageTokenUsage = screen.getByRole("region", { name: "IMG_003.png Token 用量" });
+  expect(within(imageTokenUsage).getByText("方舟未返回 Token 用量")).toBeInTheDocument();
+  await user.click(within(imageTokenUsage).getByRole("button", { name: "展开调用明细" }));
+  expect(within(imageTokenUsage).getByText("usage 数据异常")).toBeInTheDocument();
+});
+
+test("defines readable token grids and controls for intermediate widths", () => {
+  const breakpointStart = taskStyles.indexOf("@media (min-width: 761px) and (max-width: 1024px)");
+  const mobileStart = taskStyles.indexOf("@media (max-width: 760px)");
+
+  expect(breakpointStart).toBeGreaterThan(-1);
+  const intermediateStyles = taskStyles.slice(breakpointStart, mobileStart);
+  expect(intermediateStyles).toMatch(/\.token-summary-grid\s*\{[^}]*repeat\(3,/);
+  expect(intermediateStyles).toMatch(/\.image-token-grid\s*\{[^}]*repeat\(2,/);
+  expect(taskStyles).toMatch(/\.token-details-toggle\s*\{[^}]*min-height:\s*32px;/);
 });
 
 test("shows the untracked message instead of zero totals for old tasks", async () => {
