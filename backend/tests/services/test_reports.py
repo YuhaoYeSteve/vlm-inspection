@@ -34,8 +34,12 @@ class FakeFeishuClient:
         self.upload_attempts: Counter[str] = Counter()
         self.fail_blocks: set[str] = set()
         self.delay = 0.0
+        self.block_delay = 0.0
         self.active_uploads = 0
         self.max_active_uploads = 0
+        self.active_block_creates = 0
+        self.max_active_block_creates = 0
+        self.reject_concurrent_block_creates = False
 
     async def create_document(
         self,
@@ -83,9 +87,21 @@ class FakeFeishuClient:
         operation_key: str,
     ) -> BlockRef:
         assert document_id.startswith("document-")
-        self.block_attempts[operation_key] += 1
-        self.image_parent_ids.append(parent_block_id)
-        return BlockRef(f"image-{operation_key.rsplit(':', 1)[-1]}")
+        self.active_block_creates += 1
+        self.max_active_block_creates = max(
+            self.max_active_block_creates,
+            self.active_block_creates,
+        )
+        try:
+            if self.block_delay:
+                await asyncio.sleep(self.block_delay)
+            if self.reject_concurrent_block_creates and self.active_block_creates > 1:
+                raise RuntimeError("concurrent document block creation")
+            self.block_attempts[operation_key] += 1
+            self.image_parent_ids.append(parent_block_id)
+            return BlockRef(f"image-{operation_key.rsplit(':', 1)[-1]}")
+        finally:
+            self.active_block_creates -= 1
 
     async def upload_docx_image(
         self,
@@ -325,6 +341,17 @@ async def test_document_image_uploads_use_bounded_concurrency(report_fixture) ->
 
     assert exported.status == "succeeded"
     assert 1 < report_fixture.feishu.max_active_uploads <= 4
+
+
+@pytest.mark.asyncio
+async def test_document_image_blocks_are_created_serially(report_fixture) -> None:
+    report_fixture.feishu.block_delay = 0.01
+    report_fixture.feishu.reject_concurrent_block_creates = True
+
+    exported = await report_fixture.builder.export(report_fixture.task_id)
+
+    assert exported.status == "succeeded"
+    assert report_fixture.feishu.max_active_block_creates == 1
 
 
 @pytest.mark.asyncio

@@ -262,21 +262,26 @@ class ReportBuilder:
             for placement in placements
             if not self._operation_completed(export.id, placement.operation_key)
         ]
+        block_ids: dict[str, str] = {}
+        for placement in pending:
+            block_key = f"doc-image-block:{placement.image_id}"
+            block_id = self._remote_block(export.id, block_key)
+            if block_id is None:
+                block = await self.feishu.create_image_block(
+                    document_id,
+                    document_id,
+                    block_key,
+                )
+                block_id = block.id
+                self._save_remote_block(export.id, block_key, block_id)
+            block_ids[placement.image_id] = block_id
+
         semaphore = asyncio.Semaphore(self.image_upload_concurrency)
         ledger_lock = asyncio.Lock()
 
         async def upload(placement: DocumentImagePlacement) -> None:
             async with semaphore:
-                block_key = f"doc-image-block:{placement.image_id}"
-                block_id = self._remote_block(export.id, block_key)
-                if block_id is None:
-                    block = await self.feishu.create_image_block(
-                        document_id,
-                        document_id,
-                        block_key,
-                    )
-                    block_id = block.id
-                    self._save_remote_block(export.id, block_key, block_id)
+                block_id = block_ids[placement.image_id]
                 await self.feishu.upload_docx_image(
                     block_id,
                     placement.filename,
