@@ -98,7 +98,12 @@ class DeterministicFeishuConnectionProvider:
 
 
 _runtime = tempfile.TemporaryDirectory(prefix="vlm-inspector-e2e-")
-_settings = Settings(data_dir=Path(_runtime.name))
+_settings = Settings(
+    data_dir=Path(_runtime.name),
+    feishu_parent_token="folder-e2e",
+    feishu_parent_label="E2E 报告目录",
+    feishu_reference_url="https://example.feishu.cn/sheets/reference",
+)
 _settings.ensure_directories()
 _engine = make_engine(_settings.database_path)
 Base.metadata.create_all(_engine)
