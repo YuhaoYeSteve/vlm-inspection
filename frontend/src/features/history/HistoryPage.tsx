@@ -45,7 +45,7 @@ function TokenUsageCell({ task }: { task: TaskSummary }) {
         {formatTokens(task.token_usage.total_tokens)} Token
       </strong>
       {task.token_usage.unknown_call_count > 0 && (
-        <small>{task.token_usage.unknown_call_count} 次未知</small>
+        <small>至少 {task.token_usage.unknown_call_count} 次未知</small>
       )}
     </span>
   );

@@ -269,7 +269,6 @@ test("shows task totals and expands every call for selected image", async () => 
   const taskTokenUsage = await screen.findByRole("region", { name: "任务 Token 用量" });
   expect(within(taskTokenUsage).getByText("2,000")).toBeInTheDocument();
   expect(within(taskTokenUsage).getByText("缓存命中")).toBeInTheDocument();
-  expect(within(taskTokenUsage).getByText("2 次调用用量未知")).toBeInTheDocument();
 
   await user.click(screen.getByRole("button", { name: "查看 IMG_002.png" }));
   const imageTokenUsage = screen.getByRole("region", { name: "IMG_002.png Token 用量" });
@@ -279,6 +278,38 @@ test("shows task totals and expands every call for selected image", async () => 
   expect(within(imageTokenUsage).getByText("尝试 1 · 初始检查")).toBeInTheDocument();
   expect(within(imageTokenUsage).getByText("尝试 1 · JSON 修复")).toBeInTheDocument();
   expect(within(imageTokenUsage).getByText("方舟未返回 usage")).toBeInTheDocument();
+});
+
+test("shows uncached input for the selected image", async () => {
+  const user = userEvent.setup();
+  renderTask();
+
+  await screen.findByText("IMG_001.png");
+  await user.click(screen.getByRole("button", { name: "查看 IMG_002.png" }));
+  const imageTokenUsage = screen.getByRole("region", { name: "IMG_002.png Token 用量" });
+
+  expect(within(imageTokenUsage).getByText("未缓存输入")).toBeInTheDocument();
+  expect(within(imageTokenUsage).getByText("681")).toBeInTheDocument();
+});
+
+test("labels task unknown calls as a lower bound", async () => {
+  renderTask();
+
+  const taskTokenUsage = await screen.findByRole("region", { name: "任务 Token 用量" });
+  expect(within(taskTokenUsage).getByText("至少 2 次调用用量未知")).toBeInTheDocument();
+});
+
+test("labels image unknown calls as a lower bound", async () => {
+  const user = userEvent.setup();
+  renderTask();
+
+  await screen.findByText("IMG_001.png");
+  await user.click(screen.getByRole("button", { name: "查看 IMG_002.png" }));
+  const imageTokenUsage = screen.getByRole("region", { name: "IMG_002.png Token 用量" });
+
+  expect(within(imageTokenUsage).getByText(
+    "至少 1 次调用用量未知，未计入已知总量。",
+  )).toBeInTheDocument();
 });
 
 test("distinguishes succeeded and failed calls with the same missing usage error", async () => {
@@ -354,9 +385,35 @@ test("shows invalid usage separately from missing usage", async () => {
   await screen.findByText("IMG_001.png");
   await user.click(screen.getByRole("button", { name: "查看 IMG_003.png" }));
   const imageTokenUsage = screen.getByRole("region", { name: "IMG_003.png Token 用量" });
-  expect(within(imageTokenUsage).getByText("方舟未返回 Token 用量")).toBeInTheDocument();
+  expect(within(imageTokenUsage).getByText(
+    "没有可用的 Token 用量（方舟未返回或 usage 格式异常）",
+  )).toBeInTheDocument();
+  expect(within(imageTokenUsage).queryByText("方舟未返回 Token 用量")).not.toBeInTheDocument();
   await user.click(within(imageTokenUsage).getByRole("button", { name: "展开调用明细" }));
   expect(within(imageTokenUsage).getByText("usage 数据异常")).toBeInTheDocument();
+});
+
+test("explains that unavailable task usage may be missing or invalid", async () => {
+  renderTask({
+    ...taskDetail,
+    token_usage: {
+      availability: "unavailable",
+      input_tokens: 0,
+      cached_input_tokens: 0,
+      uncached_input_tokens: 0,
+      output_tokens: 0,
+      reasoning_tokens: 0,
+      total_tokens: 0,
+      known_call_count: 0,
+      unknown_call_count: 2,
+    },
+  });
+
+  const taskTokenUsage = await screen.findByRole("region", { name: "任务 Token 用量" });
+  expect(within(taskTokenUsage).getByText(
+    "没有可用的 Token 用量（方舟未返回或 usage 格式异常）",
+  )).toBeInTheDocument();
+  expect(within(taskTokenUsage).queryByText("方舟未返回 Token 用量")).not.toBeInTheDocument();
 });
 
 test("shows the untracked message instead of zero totals for old tasks", async () => {

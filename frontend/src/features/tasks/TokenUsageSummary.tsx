@@ -13,7 +13,7 @@ interface TokenUsageSummaryProps {
 function emptyMessage(usage: TokenUsageSummaryData) {
   if (usage.availability === "not_started") return "尚无模型调用";
   if (usage.availability === "untracked") return "该任务运行时尚未采集 Token 用量";
-  return "方舟未返回 Token 用量";
+  return "没有可用的 Token 用量（方舟未返回或 usage 格式异常）";
 }
 
 export function TokenUsageSummary({ usage }: TokenUsageSummaryProps) {
@@ -39,7 +39,7 @@ export function TokenUsageSummary({ usage }: TokenUsageSummaryProps) {
       <div className="token-summary-header">
         <h2>任务 Token 用量</h2>
         {usage.unknown_call_count > 0 && (
-          <span className="token-unknown">{usage.unknown_call_count} 次调用用量未知</span>
+          <span className="token-unknown">至少 {usage.unknown_call_count} 次调用用量未知</span>
         )}
       </div>
       <div className="token-summary-grid">

@@ -23,7 +23,7 @@ const statusLabels: Record<TokenUsageCall["status"], string> = {
 function emptyMessage(usage: TokenUsageSummary) {
   if (usage.availability === "not_started") return "尚无模型调用";
   if (usage.availability === "untracked") return "该图片运行时尚未采集 Token 用量";
-  return "方舟未返回 Token 用量";
+  return "没有可用的 Token 用量（方舟未返回或 usage 格式异常）";
 }
 
 function callTokens(value: number | null) {
@@ -66,6 +66,10 @@ export function TokenUsageDetails({ imageName, usage, calls }: TokenUsageDetails
               <strong>{formatTokens(usage.cached_input_tokens)}</strong>
             </div>
             <div>
+              <span>未缓存输入</span>
+              <strong>{formatTokens(usage.uncached_input_tokens)}</strong>
+            </div>
+            <div>
               <span>输出</span>
               <strong>{formatTokens(usage.output_tokens)}</strong>
             </div>
@@ -76,7 +80,7 @@ export function TokenUsageDetails({ imageName, usage, calls }: TokenUsageDetails
           </div>
           {usage.unknown_call_count > 0 && (
             <p className="token-unknown">
-              {usage.unknown_call_count} 次调用用量未知，未计入已知总量。
+              至少 {usage.unknown_call_count} 次调用用量未知，未计入已知总量。
             </p>
           )}
         </>
