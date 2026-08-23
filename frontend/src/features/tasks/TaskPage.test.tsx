@@ -534,7 +534,7 @@ test("asks for confirmation before exporting failed items", async () => {
   await waitFor(() => expect(includeFailures).toBe(true));
 });
 
-test("opens a generated report as a Feishu spreadsheet", async () => {
+test("opens a generated report as a Feishu document", async () => {
   renderTask({
     ...taskDetail,
     status: "completed",
@@ -543,7 +543,7 @@ test("opens a generated report as a Feishu spreadsheet", async () => {
     report_url: "https://example.feishu.cn/sheets/report-1",
   });
 
-  const link = await screen.findByRole("link", { name: "打开飞书表格" });
+  const link = await screen.findByRole("link", { name: "打开飞书文档" });
   expect(link).toHaveAttribute("href", "https://example.feishu.cn/sheets/report-1");
 });
 

@@ -94,7 +94,7 @@ test("links back to task detail and opens a completed Feishu report safely", asy
 
   const taskLink = await screen.findByRole("link", { name: "查看早班巡检" });
   expect(taskLink).toHaveAttribute("href", "/tasks/older");
-  const reportLink = screen.getByRole("link", { name: "打开早班巡检飞书表格" });
+  const reportLink = screen.getByRole("link", { name: "打开早班巡检飞书文档" });
   expect(reportLink).toHaveAttribute("href", "https://example.feishu.cn/sheets/report-1");
   expect(reportLink).toHaveAttribute("target", "_blank");
   expect(reportLink).toHaveAttribute("rel", "noreferrer");

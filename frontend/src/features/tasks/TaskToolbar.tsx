@@ -120,7 +120,7 @@ export function TaskToolbar({
           )}
           {task.report_url && (
             <a className="button primary-button" href={task.report_url} target="_blank" rel="noreferrer">
-              打开飞书表格
+              打开飞书文档
             </a>
           )}
           {canCancel && (
