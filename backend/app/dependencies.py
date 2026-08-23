@@ -1,7 +1,7 @@
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, cast
 
 from fastapi import Depends, Request
 from sqlalchemy.orm import Session
@@ -24,7 +24,7 @@ def get_session(request: Request) -> Iterator[Session]:
 
 
 def get_secret_store(request: Request) -> SecretStoreProtocol:
-    return request.app.state.secret_store
+    return cast(SecretStoreProtocol, request.app.state.secret_store)
 
 
 @dataclass(frozen=True)
@@ -89,15 +89,18 @@ def get_task_dependencies(
         session=session,
         repo=TaskRepository(session),
         ingestor=ImageIngestor(data_dir / "images"),
-        runner=request.app.state.runner,
-        reports=request.app.state.report_coordinator,
+        runner=cast(TaskRunner, request.app.state.runner),
+        reports=cast(ReportCoordinator, request.app.state.report_coordinator),
         data_dir=data_dir,
     )
 
 
 def get_event_broker(request: Request) -> TaskEventBroker:
-    return request.app.state.event_broker
+    return cast(TaskEventBroker, request.app.state.event_broker)
 
 
 def get_feishu_connection_provider(request: Request) -> FeishuConnectionProviderProtocol:
-    return request.app.state.feishu_connection_provider
+    return cast(
+        FeishuConnectionProviderProtocol,
+        request.app.state.feishu_connection_provider,
+    )

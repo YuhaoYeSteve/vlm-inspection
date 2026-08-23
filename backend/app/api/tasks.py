@@ -1,6 +1,6 @@
 import asyncio
 import json
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -387,7 +387,7 @@ async def task_events(
     except LookupError as exc:
         raise _not_found(task_id) from exc
 
-    async def stream():
+    async def stream() -> AsyncIterator[ServerSentEvent]:
         async with broker.subscribe(task_id, after_id=last_event_id) as queue:
             while True:
                 try:

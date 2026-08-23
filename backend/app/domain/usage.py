@@ -180,7 +180,7 @@ def _mapping(value: Any) -> dict[str, Any]:
 def _required_int(value: Any) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise TypeError("usage value is not an integer")
-    return value
+    return cast(int, value)
 
 
 def _unknown_call(
