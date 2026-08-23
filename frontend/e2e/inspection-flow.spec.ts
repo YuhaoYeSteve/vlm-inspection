@@ -21,6 +21,10 @@ test("configures, runs three images, and opens the Feishu report", async ({ page
     "href",
     "https://example.feishu.cn/sheets/report-1",
   );
+  const taskUsage = page.getByRole("region", { name: "任务 Token 用量" });
+  await expect(taskUsage).toContainText("总 Token");
+  await expect(taskUsage).toContainText("36");
+  await expect(taskUsage).toContainText("缓存命中");
   const browserStorage = await page.evaluate(() =>
     JSON.stringify({ localStorage: { ...localStorage }, sessionStorage: { ...sessionStorage } }),
   );
