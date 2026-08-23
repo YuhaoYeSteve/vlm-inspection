@@ -279,6 +279,96 @@ def test_chat_usage_is_normalized(tmp_path) -> None:
     assert outcome.usage.totals.total_tokens == 95
 
 
+def test_unexpected_local_parser_error_is_not_converted_to_request_error(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    image = tmp_path / "image.jpg"
+    image.write_bytes(b"jpeg-bytes")
+    responses = FakeResponses([(json.dumps(VALID), RESPONSES_USAGE)])
+    service = ArkInspectionService(client=SimpleNamespace(responses=responses))
+
+    def fail_locally(_text: str) -> Verdict:
+        raise RuntimeError("local parser defect")
+
+    monkeypatch.setattr(service, "_parse", fail_locally)
+
+    with pytest.raises(RuntimeError) as raised:
+        service.inspect_responses(runtime(), "system", "user", image)
+
+    assert type(raised.value) is RuntimeError
+    assert str(raised.value) == "local parser defect"
+
+
+def test_unexpected_local_repair_error_is_not_converted_to_request_error(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    image = tmp_path / "image.jpg"
+    image.write_bytes(b"jpeg-bytes")
+    responses = FakeResponses([("not-json", RESPONSES_USAGE)])
+    service = ArkInspectionService(client=SimpleNamespace(responses=responses))
+
+    def fail_locally(_text: str) -> str:
+        raise RuntimeError("local repair defect")
+
+    monkeypatch.setattr(service, "_repair_prompt", fail_locally)
+
+    with pytest.raises(RuntimeError) as raised:
+        service.inspect_responses(runtime(), "system", "user", image)
+
+    assert type(raised.value) is RuntimeError
+    assert str(raised.value) == "local repair defect"
+    assert len(responses.calls) == 1
+
+
+def test_chat_unsupported_schema_tracks_fallback_usage(tmp_path) -> None:
+    image = tmp_path / "image.jpg"
+    image.write_bytes(b"jpeg-bytes")
+    completions = FakeCompletions(
+        [UnsupportedSchemaError(), (json.dumps(VALID), CHAT_USAGE)]
+    )
+    service = ArkInspectionService(
+        client=SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    )
+
+    outcome = service.inspect_chat(runtime("chat"), "system", "user", image)
+
+    inspection, fallback = outcome.usage.calls
+    assert outcome.result.verdict is Verdict.PASS
+    assert completions.calls[1]["response_format"] == {"type": "json_object"}
+    assert (inspection.purpose, inspection.status, inspection.usage_available) == (
+        "inspection",
+        "failed",
+        False,
+    )
+    assert (fallback.purpose, fallback.status, fallback.total_tokens) == (
+        "schema_fallback",
+        "succeeded",
+        95,
+    )
+
+
+def test_chat_invalid_response_tracks_repair_usage(tmp_path) -> None:
+    image = tmp_path / "image.jpg"
+    image.write_bytes(b"jpeg-bytes")
+    completions = FakeCompletions(
+        [
+            ("not-json", CHAT_USAGE),
+            (json.dumps(VALID), CHAT_USAGE),
+        ]
+    )
+    service = ArkInspectionService(
+        client=SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    )
+
+    outcome = service.inspect_chat(runtime("chat"), "system", "user", image)
+
+    assert outcome.result.verdict is Verdict.PASS
+    assert [call.purpose for call in outcome.usage.calls] == ["inspection", "json_repair"]
+    assert outcome.usage.totals.total_tokens == 190
+
+
 @pytest.mark.parametrize(
     ("usage", "expected_error"),
     [

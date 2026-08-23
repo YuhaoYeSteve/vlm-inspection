@@ -50,6 +50,12 @@ class MalformedInspectionResult(ValueError):
         self.usage = usage
 
 
+class _ProviderInvocationError(Exception):
+    def __init__(self, error: Exception) -> None:
+        super().__init__(str(error))
+        self.error = error
+
+
 class InspectionServiceProtocol(Protocol):
     def inspect(
         self,
@@ -139,24 +145,40 @@ class ArkInspectionService:
                     thinking={"type": config.thinking},
                     timeout=config.timeout_seconds,
                 )
-            except Exception as exc:
-                if not self._is_unsupported_schema(exc):
-                    raise
+            except _ProviderInvocationError as call_error:
+                provider_error = call_error.error
+                if not self._is_unsupported_schema(provider_error):
+                    raise self._request_error(
+                        provider_error,
+                        collector.snapshot(),
+                    ) from provider_error
                 fallback_prompt = self._json_object_prompt(user_prompt)
-                response = self._responses_json_object_call(
-                    client,
-                    config,
-                    system_prompt,
-                    fallback_prompt,
-                    image_data_url,
-                    collector,
-                )
+                try:
+                    response = self._responses_json_object_call(
+                        client,
+                        config,
+                        system_prompt,
+                        fallback_prompt,
+                        image_data_url,
+                        collector,
+                    )
+                except _ProviderInvocationError as fallback_error:
+                    raise self._request_error(
+                        fallback_error.error,
+                        collector.snapshot(),
+                    ) from fallback_error.error
 
             text = self._responses_text(response)
             try:
                 result = self._parse(text)
             except MalformedInspectionResult:
-                repaired = self._repair_responses(client, config, text, collector)
+                try:
+                    repaired = self._repair_responses(client, config, text, collector)
+                except _ProviderInvocationError as repair_error:
+                    raise self._request_error(
+                        repair_error.error,
+                        collector.snapshot(),
+                    ) from repair_error.error
                 result = self._parse(self._responses_text(repaired))
             return InspectionOutcome(result=result, usage=collector.snapshot())
         except MalformedInspectionResult as exc:
@@ -164,11 +186,6 @@ class ArkInspectionService:
             if malformed_error is exc:
                 raise
             raise malformed_error from exc
-        except Exception as exc:
-            request_error = self._request_error(exc, collector.snapshot())
-            if request_error is exc:
-                raise
-            raise request_error from exc
 
     def inspect_chat(
         self,
@@ -203,23 +220,40 @@ class ArkInspectionService:
                     },
                     timeout=config.timeout_seconds,
                 )
-            except Exception as exc:
-                if not self._is_unsupported_schema(exc):
-                    raise
-                response = self._chat_json_object_call(
-                    client,
-                    config,
-                    system_prompt,
-                    self._json_object_prompt(user_prompt),
-                    image_data_url,
-                    collector,
-                )
+            except _ProviderInvocationError as call_error:
+                provider_error = call_error.error
+                if not self._is_unsupported_schema(provider_error):
+                    raise self._request_error(
+                        provider_error,
+                        collector.snapshot(),
+                    ) from provider_error
+                fallback_prompt = self._json_object_prompt(user_prompt)
+                try:
+                    response = self._chat_json_object_call(
+                        client,
+                        config,
+                        system_prompt,
+                        fallback_prompt,
+                        image_data_url,
+                        collector,
+                    )
+                except _ProviderInvocationError as fallback_error:
+                    raise self._request_error(
+                        fallback_error.error,
+                        collector.snapshot(),
+                    ) from fallback_error.error
 
             text = self._chat_text(response)
             try:
                 result = self._parse(text)
             except MalformedInspectionResult:
-                repaired = self._repair_chat(client, config, text, collector)
+                try:
+                    repaired = self._repair_chat(client, config, text, collector)
+                except _ProviderInvocationError as repair_error:
+                    raise self._request_error(
+                        repair_error.error,
+                        collector.snapshot(),
+                    ) from repair_error.error
                 result = self._parse(self._chat_text(repaired))
             return InspectionOutcome(result=result, usage=collector.snapshot())
         except MalformedInspectionResult as exc:
@@ -227,11 +261,6 @@ class ArkInspectionService:
             if malformed_error is exc:
                 raise
             raise malformed_error from exc
-        except Exception as exc:
-            request_error = self._request_error(exc, collector.snapshot())
-            if request_error is exc:
-                raise
-            raise request_error from exc
 
     def _client(self, config: ArkRuntimeConfig) -> Any:
         if self.client is not None:
@@ -430,9 +459,9 @@ class ArkInspectionService:
     ) -> Any:
         try:
             response = create(**kwargs)
-        except Exception:
+        except Exception as exc:
             collector.add_missing(purpose)
-            raise
+            raise _ProviderInvocationError(exc) from exc
 
         try:
             raw_usage = getattr(response, "usage", None)
@@ -461,9 +490,8 @@ class ArkInspectionService:
     @staticmethod
     def _request_error(exc: Exception, usage: AttemptUsageTrace) -> ArkRequestError:
         if isinstance(exc, ArkRequestError):
-            if exc.usage is not None:
-                return exc
-            return ArkRequestError(exc.status_code, exc.headers, exc.code, usage)
+            preserved_usage = exc.usage if exc.usage is not None else usage
+            return ArkRequestError(exc.status_code, exc.headers, exc.code, preserved_usage)
         response = getattr(exc, "response", None)
         status = getattr(exc, "status_code", None) or getattr(response, "status_code", None)
         raw_headers = getattr(exc, "headers", None) or getattr(response, "headers", None) or {}
