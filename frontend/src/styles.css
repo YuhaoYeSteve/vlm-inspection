@@ -407,6 +407,56 @@ textarea:focus-visible {
   color: var(--ink);
 }
 
+.connection-status strong.is-connected {
+  color: var(--accent);
+}
+
+.integration-details {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  overflow: hidden;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.integration-details > div {
+  min-width: 0;
+  padding: 14px;
+  background: var(--surface);
+}
+
+.integration-details dt {
+  color: var(--ink-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.integration-details dd {
+  margin: 5px 0 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.integration-detail-wide {
+  grid-column: 1 / -1;
+}
+
+.integration-hint {
+  margin: 14px 0 0;
+  color: var(--warning);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.integration-details + .form-actions a {
+  text-decoration: none;
+}
+
 .docs-link {
   display: inline-flex;
   align-items: center;
@@ -1524,6 +1574,14 @@ textarea:focus-visible {
   }
 
   .field-wide {
+    grid-column: auto;
+  }
+
+  .integration-details {
+    grid-template-columns: 1fr;
+  }
+
+  .integration-detail-wide {
     grid-column: auto;
   }
 

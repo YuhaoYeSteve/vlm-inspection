@@ -1,16 +1,13 @@
 import {
+  ArrowClockwise,
   ArrowSquareOut,
-  CheckCircle,
   CloudArrowUp,
   Key,
   LinkSimple,
   LockKey,
-  PlugsConnected,
-  SignOut,
 } from "@phosphor-icons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FormEvent, useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
 
 import { ApiError, api } from "../../api/client";
 import type { ArkSettings } from "../../api/types";
@@ -31,12 +28,7 @@ function errorMessage(error: unknown): string {
 
 export function SettingsPage() {
   const queryClient = useQueryClient();
-  const [searchParams] = useSearchParams();
   const ark = useQuery({ queryKey: ["settings", "ark"], queryFn: api.getArkSettings });
-  const feishu = useQuery({
-    queryKey: ["settings", "feishu"],
-    queryFn: api.getFeishuSettings,
-  });
   const feishuStatus = useQuery({
     queryKey: ["auth", "feishu"],
     queryFn: api.getFeishuStatus,
@@ -45,20 +37,12 @@ export function SettingsPage() {
   const [arkKey, setArkKey] = useState("");
   const [arkMessage, setArkMessage] = useState<string | null>(null);
   const [arkError, setArkError] = useState<string | null>(null);
-  const [feishuForm, setFeishuForm] = useState({ app_id: "", folder_token: "" });
-  const [feishuSecret, setFeishuSecret] = useState("");
-  const [feishuMessage, setFeishuMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!ark.data) return;
     const { api_key_configured: _configured, ...publicSettings } = ark.data;
     setArkForm(publicSettings);
   }, [ark.data]);
-
-  useEffect(() => {
-    if (!feishu.data) return;
-    setFeishuForm({ app_id: feishu.data.app_id, folder_token: feishu.data.folder_token });
-  }, [feishu.data]);
 
   const saveArk = useMutation({
     mutationFn: async () => {
@@ -77,29 +61,6 @@ export function SettingsPage() {
     },
   });
 
-  const connectFeishu = useMutation({
-    mutationFn: async () => {
-      await api.saveFeishuSettings({ ...feishuForm, app_secret: feishuSecret || null });
-      return api.startFeishuAuth();
-    },
-    onSuccess: ({ authorization_url }) => {
-      setFeishuSecret("");
-      setFeishuMessage("已打开飞书授权页面");
-      void queryClient.invalidateQueries({ queryKey: ["settings", "feishu"] });
-      window.open(authorization_url, "_blank", "noopener,noreferrer");
-    },
-    onError: (error) => setFeishuMessage(errorMessage(error)),
-  });
-
-  const disconnect = useMutation({
-    mutationFn: api.disconnectFeishu,
-    onSuccess: () => {
-      setFeishuMessage("已断开飞书授权");
-      void queryClient.invalidateQueries({ queryKey: ["auth", "feishu"] });
-    },
-    onError: (error) => setFeishuMessage(errorMessage(error)),
-  });
-
   function submitArk(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (arkForm.concurrency < 1 || arkForm.concurrency > 5) {
@@ -111,8 +72,7 @@ export function SettingsPage() {
     saveArk.mutate();
   }
 
-  const callbackState = searchParams.get("feishu");
-  const loading = ark.isLoading || feishu.isLoading || feishuStatus.isLoading;
+  const loading = ark.isLoading || feishuStatus.isLoading;
 
   return (
     <main className="page settings-page">
@@ -121,15 +81,6 @@ export function SettingsPage() {
         <h1>设置</h1>
         <p>密钥只保存在系统钥匙串。浏览器和本地数据库只记录是否已配置。</p>
       </header>
-
-      {callbackState === "connected" && (
-        <div className="notice success-notice" role="status">
-          <CheckCircle size={20} weight="fill" /> 飞书授权已完成
-        </div>
-      )}
-      {callbackState === "error" && (
-        <div className="notice error-notice" role="alert">飞书授权失败，请重新连接。</div>
-      )}
 
       {loading ? (
         <div className="settings-grid" aria-label="正在加载设置">
@@ -269,80 +220,54 @@ export function SettingsPage() {
             </div>
             <div className="connection-status">
               <span>授权状态</span>
-              <strong>{feishuStatus.data?.connected ? "已连接" : "未连接"}</strong>
+              <strong className={feishuStatus.data?.connected ? "is-connected" : ""}>
+                {feishuStatus.data?.connected ? "已连接" : "未连接"}
+              </strong>
             </div>
-            <div className="field-grid">
-              <label className="field field-wide">
-                <span>App ID</span>
-                <input
-                  value={feishuForm.app_id}
-                  onChange={(event) =>
-                    setFeishuForm({ ...feishuForm, app_id: event.target.value })
-                  }
-                />
-              </label>
-              <label className="field field-wide">
-                <span>App Secret</span>
-                <div className="secret-input-wrap">
-                  <Key size={18} aria-hidden="true" />
-                  <input
-                    aria-label="App Secret"
-                    type="password"
-                    autoComplete="new-password"
-                    placeholder={
-                      feishu.data?.app_secret_configured ? "留空以保留现有密钥" : "输入 App Secret"
-                    }
-                    value={feishuSecret}
-                    onChange={(event) => setFeishuSecret(event.target.value)}
-                  />
-                </div>
-                {feishu.data?.app_secret_configured && (
-                  <small className="secure-state"><LockKey size={14} /> 已存入系统钥匙串</small>
-                )}
-              </label>
-              <label className="field field-wide">
-                <span>报告文件夹 Token</span>
-                <input
-                  value={feishuForm.folder_token}
-                  onChange={(event) =>
-                    setFeishuForm({ ...feishuForm, folder_token: event.target.value })
-                  }
-                />
-              </label>
-              <label className="field field-wide">
-                <span>OAuth 回调地址</span>
-                <input value={feishu.data?.callback_url ?? ""} readOnly />
-              </label>
-              <div className="form-actions field-wide split-actions">
-                <button
-                  className="button primary-button"
-                  type="button"
-                  disabled={connectFeishu.isPending}
-                  onClick={() => connectFeishu.mutate()}
-                >
-                  <PlugsConnected size={18} weight="bold" />
-                  {connectFeishu.isPending ? "正在准备授权..." : "连接飞书"}
-                </button>
-                {feishuStatus.data?.connected && (
-                  <button
-                    className="button quiet-button"
-                    type="button"
-                    onClick={() => disconnect.mutate()}
-                  >
-                    <SignOut size={18} /> 断开
-                  </button>
-                )}
-                <span className="form-message" aria-live="polite">{feishuMessage}</span>
+            <dl className="integration-details">
+              <div>
+                <dt>已连接账号</dt>
+                <dd>{feishuStatus.data?.user_name ?? "—"}</dd>
               </div>
+              <div>
+                <dt>授权方式</dt>
+                <dd>Codex 对话授权</dd>
+              </div>
+              <div>
+                <dt>飞书应用</dt>
+                <dd>{feishuStatus.data?.app_name ?? "—"}</dd>
+              </div>
+              <div className="integration-detail-wide">
+                <dt>报告位置</dt>
+                <dd>{feishuStatus.data?.destination_path || "未配置"}</dd>
+              </div>
+            </dl>
+            <div className="form-actions split-actions">
+              <button
+                className="button quiet-button"
+                type="button"
+                disabled={feishuStatus.isFetching}
+                onClick={() => void feishuStatus.refetch()}
+              >
+                <ArrowClockwise size={18} />
+                {feishuStatus.isFetching ? "刷新中..." : "刷新状态"}
+              </button>
+              {feishuStatus.data?.reference_url && (
+                <a
+                  className="button quiet-button"
+                  href={feishuStatus.data.reference_url}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  打开参考文档 <ArrowSquareOut size={16} />
+                </a>
+              )}
             </div>
-            <a
-              className="docs-link"
-              href="https://open.feishu.cn/document/"
-              target="_blank"
-              rel="noreferrer"
-            >
-              查看飞书开放平台配置说明 <ArrowSquareOut size={16} />
-            </a>
+            {!feishuStatus.data?.connected && (
+              <p className="integration-hint">
+                请在 Codex 对话中输入“授权飞书”，完成后刷新状态。
+              </p>
+            )}
           </section>
         </div>
       )}

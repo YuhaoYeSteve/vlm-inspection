@@ -29,11 +29,17 @@ export interface ArkSettings {
   api_key_configured: boolean;
 }
 
-export interface FeishuSettings {
-  app_id: string;
-  folder_token: string;
-  callback_url: string;
-  app_secret_configured: boolean;
+export interface FeishuConnection {
+  configured: boolean;
+  connected: boolean;
+  user_name: string | null;
+  app_name: string | null;
+  identity: string | null;
+  token_status: string | null;
+  expires_at: string | null;
+  destination_path: string;
+  reference_url: string;
+  error_code: string | null;
 }
 
 export interface TemplateRule {

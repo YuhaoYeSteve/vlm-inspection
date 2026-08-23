@@ -19,14 +19,21 @@ const arkSettings = {
   api_key_configured: true,
 };
 
-const feishuSettings = {
-  app_id: "cli_example",
-  folder_token: "folder-1",
-  callback_url: "http://127.0.0.1:8000/api/auth/feishu/callback",
-  app_secret_configured: true,
+const feishuStatus = {
+  configured: true,
+  connected: true,
+  user_name: "测试用户",
+  app_name: "示例应用",
+  identity: "user",
+  token_status: "valid",
+  expires_at: "2030-01-01T00:00:00Z",
+  destination_path: "我的空间 / 示例目录 / 巡检报告",
+  reference_url: "https://example.feishu.cn/docx/reference",
+  error_code: null,
 };
 
 function useDefaultHandlers() {
+  const statusHandler = vi.fn(() => HttpResponse.json(feishuStatus));
   server.use(
     http.get("*/api/settings/ark", () => HttpResponse.json(arkSettings)),
     http.put("*/api/settings/ark", async ({ request }) => {
@@ -36,16 +43,9 @@ function useDefaultHandlers() {
     http.post("*/api/settings/ark/test", () =>
       HttpResponse.json({ ok: true, protocol: "responses", model: "seed-vision", latency_ms: 81 }),
     ),
-    http.get("*/api/settings/feishu", () => HttpResponse.json(feishuSettings)),
-    http.put("*/api/settings/feishu", () => HttpResponse.json(feishuSettings)),
-    http.get("*/api/auth/feishu/status", () =>
-      HttpResponse.json({ configured: true, connected: false, expires_at: null }),
-    ),
-    http.get("*/api/auth/feishu/start", () =>
-      HttpResponse.json({ authorization_url: "https://accounts.feishu.cn/authorize?state=test" }),
-    ),
-    http.delete("*/api/auth/feishu/disconnect", () => new HttpResponse(null, { status: 204 })),
+    http.get("*/api/auth/feishu/status", statusHandler),
   );
+  return { statusHandler };
 }
 
 function renderSettings(entry = "/settings") {
@@ -65,9 +65,9 @@ test("shows masked configured states without rendering secrets", async () => {
   useDefaultHandlers();
   renderSettings();
 
-  expect(await screen.findAllByText("已存入系统钥匙串")).toHaveLength(2);
+  expect(await screen.findAllByText("已存入系统钥匙串")).toHaveLength(1);
   expect(screen.getByLabelText("API Key")).toHaveValue("");
-  expect(screen.getByLabelText("App Secret")).toHaveValue("");
+  expect(screen.queryByLabelText("App Secret")).not.toBeInTheDocument();
   expect(document.body.textContent).not.toContain("ark-secret-value");
 });
 
@@ -97,20 +97,31 @@ test("validates concurrency before sending", async () => {
   expect(await screen.findByText("并发数必须在 1 到 5 之间")).toBeInTheDocument();
 });
 
-test("opens Feishu authorization and renders callback success", async () => {
+test("renders Feishu account and destination without credential inputs", async () => {
   useDefaultHandlers();
-  const open = vi.spyOn(window, "open").mockImplementation(() => null);
-  const user = userEvent.setup();
-  renderSettings("/settings?feishu=connected");
+  renderSettings();
 
-  expect(await screen.findByText("飞书授权已完成")).toBeInTheDocument();
-  await user.click(await screen.findByRole("button", { name: "连接飞书" }));
-
-  await waitFor(() =>
-    expect(open).toHaveBeenCalledWith(
-      "https://accounts.feishu.cn/authorize?state=test",
-      "_blank",
-      "noopener,noreferrer",
-    ),
+  expect(await screen.findByText("测试用户")).toBeInTheDocument();
+  expect(screen.getByText("示例应用")).toBeInTheDocument();
+  expect(screen.getByText(feishuStatus.destination_path)).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: /打开参考文档/ })).toHaveAttribute(
+    "href",
+    feishuStatus.reference_url,
   );
+  expect(screen.queryByText("App ID")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("App Secret")).not.toBeInTheDocument();
+  expect(screen.queryByText("报告文件夹 Token")).not.toBeInTheDocument();
+  expect(screen.queryByText("OAuth 回调地址")).not.toBeInTheDocument();
+});
+
+test("refreshes conversation authorization status", async () => {
+  const { statusHandler } = useDefaultHandlers();
+  const user = userEvent.setup();
+  renderSettings();
+  await screen.findByText("测试用户");
+  expect(statusHandler).toHaveBeenCalledTimes(1);
+
+  await user.click(screen.getByRole("button", { name: "刷新状态" }));
+
+  await waitFor(() => expect(statusHandler).toHaveBeenCalledTimes(2));
 });

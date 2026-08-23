@@ -1,6 +1,6 @@
 import type {
   ArkSettings,
-  FeishuSettings,
+  FeishuConnection,
   InspectionResult,
   TaskDetail,
   TaskSummary,
@@ -63,20 +63,8 @@ export class ApiClient {
       "/api/settings/ark/test",
       { method: "POST" },
     );
-  getFeishuSettings = () => this.request<FeishuSettings>("/api/settings/feishu");
-  saveFeishuSettings = (
-    body: Omit<FeishuSettings, "callback_url" | "app_secret_configured"> & {
-      app_secret: string | null;
-    },
-  ) => this.request<FeishuSettings>("/api/settings/feishu", { method: "PUT", body });
   getFeishuStatus = () =>
-    this.request<{ configured: boolean; connected: boolean; expires_at: number | null }>(
-      "/api/auth/feishu/status",
-    );
-  startFeishuAuth = () =>
-    this.request<{ authorization_url: string }>("/api/auth/feishu/start");
-  disconnectFeishu = () =>
-    this.request<void>("/api/auth/feishu/disconnect", { method: "DELETE" });
+    this.request<FeishuConnection>("/api/auth/feishu/status");
 
   listTemplates = () => this.request<TemplateSummary[]>("/api/templates");
   getTemplate = (id: string) => this.request<TemplateDetail>(`/api/templates/${id}`);
