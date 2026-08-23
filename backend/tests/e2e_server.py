@@ -7,7 +7,7 @@ from app.domain.results import Finding, FindingStatus, InspectionResult, Verdict
 from app.main import create_app
 from app.repositories import SettingsRepository
 from app.services.ark import ArkRuntimeConfig, InspectionOutcome
-from app.services.feishu_client import BlockRef, DocumentRef
+from app.services.feishu_client import SpreadsheetRef
 from tests.usage_fixtures import successful_usage
 
 
@@ -54,45 +54,29 @@ class DeterministicInspectionService:
 
 
 class DeterministicFeishuClient:
-    async def create_document(
+    async def create_spreadsheet(
         self,
         title: str,
         folder_token: str,
-        client_token: str,
-    ) -> DocumentRef:
-        del title, folder_token, client_token
-        return DocumentRef("report-1", "https://example.feishu.cn/docx/report-1")
+        values: list[list[str]],
+        styles: dict,
+    ) -> SpreadsheetRef:
+        del title, folder_token, values, styles
+        return SpreadsheetRef(
+            "report-1",
+            "https://example.feishu.cn/sheets/report-1",
+            "worksheet-1",
+        )
 
-    async def create_blocks(
+    async def set_cell_image(
         self,
-        document_id: str,
-        parent_block_id: str,
-        blocks: list[dict],
-        operation_key: str,
-    ) -> list[BlockRef]:
-        del document_id, parent_block_id, blocks
-        return [BlockRef(f"block-{operation_key}")]
-
-    async def append_document_xml(
-        self,
-        document_id: str,
-        content: str,
-        operation_key: str,
+        spreadsheet_token: str,
+        sheet_id: str,
+        cell: str,
+        image_path: Path,
+        filename: str,
     ) -> None:
-        del document_id, content, operation_key
-
-    async def create_image_block(
-        self,
-        document_id: str,
-        parent_block_id: str,
-        operation_key: str,
-    ) -> BlockRef:
-        del document_id, parent_block_id
-        return BlockRef(f"image-{operation_key}")
-
-    async def upload_docx_image(self, block_id: str, filename: str, content: bytes) -> str:
-        del block_id, filename, content
-        return "file-e2e"
+        del spreadsheet_token, sheet_id, cell, image_path, filename
 
 
 _runtime = tempfile.TemporaryDirectory(prefix="vlm-inspector-e2e-")

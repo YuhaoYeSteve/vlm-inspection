@@ -1,5 +1,4 @@
 import asyncio
-import hashlib
 import json
 import os
 import shutil
@@ -8,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol, cast
 
-from app.services.feishu_client import BlockRef, DocumentRef, FeishuApiError, SpreadsheetRef
+from app.services.feishu_client import SpreadsheetRef
 
 REQUIRED_REPORT_SCOPES = frozenset(
     {
@@ -309,132 +308,3 @@ class LarkCliFeishuClient:
             if isinstance(sheet_id, str) and sheet_id:
                 return sheet_id
         return None
-
-    async def create_document(
-        self,
-        title: str,
-        folder_token: str,
-        client_token: str,
-    ) -> DocumentRef:
-        data = await self._api(
-            "POST",
-            "/open-apis/docx/v1/documents",
-            params={"client_token": client_token},
-            body={"title": title, "folder_token": folder_token},
-        )
-        document = data["document"]
-        document_id = str(document["document_id"])
-        url = str(document.get("url") or f"https://feishu.cn/docx/{document_id}")
-        return DocumentRef(document_id, url)
-
-    async def create_blocks(
-        self,
-        document_id: str,
-        parent_block_id: str,
-        blocks: list[dict[str, Any]],
-        operation_key: str,
-    ) -> list[BlockRef]:
-        data = await self._api(
-            "POST",
-            f"/open-apis/docx/v1/documents/{document_id}/blocks/{parent_block_id}/children",
-            params={
-                "document_revision_id": "-1",
-                "client_token": self._client_token(operation_key),
-            },
-            body={"children": blocks, "index": -1},
-        )
-        return [BlockRef(str(block["block_id"])) for block in data["children"]]
-
-    async def append_document_xml(
-        self,
-        document_id: str,
-        content: str,
-        operation_key: str,
-    ) -> None:
-        del operation_key
-        payload = await self.runner.run(
-            [
-                "docs",
-                "+update",
-                "--doc",
-                document_id,
-                "--command",
-                "append",
-                "--doc-format",
-                "xml",
-                "--content",
-                "-",
-                "--as",
-                "user",
-                "--format",
-                "json",
-            ],
-            stdin=content.encode("utf-8"),
-            timeout=60,
-        )
-        data = payload.get("data")
-        if not isinstance(data, dict) or data.get("result") != "success":
-            raise LarkCliCommandError("lark_cli_invalid_response")
-
-    async def create_image_block(
-        self,
-        document_id: str,
-        parent_block_id: str,
-        operation_key: str,
-    ) -> BlockRef:
-        blocks = await self.create_blocks(
-            document_id,
-            parent_block_id,
-            [{"block_type": 27, "image": {}}],
-            operation_key,
-        )
-        if not blocks:
-            raise FeishuApiError("image_block_missing")
-        return blocks[0]
-
-    async def upload_docx_image(self, block_id: str, filename: str, content: bytes) -> str:
-        data = await self._api(
-            "POST",
-            "/open-apis/drive/v1/medias/upload_all",
-            body={
-                "file_name": filename,
-                "parent_type": "docx_image",
-                "parent_node": block_id,
-                "size": str(len(content)),
-            },
-            file_stdin=content,
-            timeout=90,
-        )
-        return str(data["file_token"])
-
-    async def _api(
-        self,
-        method: str,
-        path: str,
-        *,
-        params: dict[str, Any] | None = None,
-        body: dict[str, Any] | None = None,
-        file_stdin: bytes | None = None,
-        timeout: float = 60,
-    ) -> dict[str, Any]:
-        args = ["api", method, path, "--as", "user", "--format", "json"]
-        if params is not None:
-            args.extend(["--params", json.dumps(params, ensure_ascii=False)])
-        if body is not None:
-            args.extend(["--data", json.dumps(body, ensure_ascii=False)])
-        if file_stdin is not None:
-            args.extend(["--file", "file=-"])
-        payload = await self.runner.run(args, stdin=file_stdin, timeout=timeout)
-        if payload.get("ok") is not True:
-            raw_error = payload.get("error")
-            error: dict[str, Any] = raw_error if isinstance(raw_error, dict) else {}
-            code = str(error.get("subtype") or error.get("type") or "feishu_api_error")
-            raise LarkCliCommandError(code)
-        data = payload.get("data")
-        if not isinstance(data, dict):
-            raise LarkCliCommandError("lark_cli_invalid_response")
-        return data
-
-    @staticmethod
-    def _client_token(operation_key: str) -> str:
-        return hashlib.sha256(operation_key.encode()).hexdigest()[:32]

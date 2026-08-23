@@ -14,7 +14,7 @@ from app.core.db import Base, make_engine
 from app.domain.results import Finding, FindingStatus, InspectionResult, Verdict
 from app.main import create_app
 from app.services.ark import ArkRuntimeConfig, InspectionOutcome
-from app.services.feishu_client import BlockRef, DocumentRef
+from app.services.feishu_client import SpreadsheetRef
 from app.services.lark_cli import FeishuConnection
 from tests.usage_fixtures import failed_usage, successful_usage
 
@@ -123,55 +123,36 @@ class FakeFeishuConnectionProvider:
 
 @dataclass
 class FakeReportFeishuClient:
-    created_documents: int = 0
+    created_spreadsheets: int = 0
     calls: list[str] = field(default_factory=list)
 
-    async def create_document(
+    async def create_spreadsheet(
         self,
         title: str,
         folder_token: str,
-        client_token: str,
-    ) -> DocumentRef:
-        del title, folder_token, client_token
-        self.created_documents += 1
-        document_id = f"report-{self.created_documents}"
-        self.calls.append("create_document")
-        return DocumentRef(document_id, f"https://example.feishu.cn/docx/{document_id}")
+        values: list[list[str]],
+        styles: dict,
+    ) -> SpreadsheetRef:
+        del title, folder_token, values, styles
+        self.created_spreadsheets += 1
+        token = f"report-{self.created_spreadsheets}"
+        self.calls.append("create_spreadsheet")
+        return SpreadsheetRef(
+            token,
+            f"https://example.feishu.cn/sheets/{token}",
+            f"worksheet-{self.created_spreadsheets}",
+        )
 
-    async def create_blocks(
+    async def set_cell_image(
         self,
-        document_id: str,
-        parent_block_id: str,
-        blocks: list[dict],
-        operation_key: str,
-    ) -> list[BlockRef]:
-        del document_id, parent_block_id, blocks
-        self.calls.append(operation_key)
-        return [BlockRef(f"block-{len(self.calls)}")]
-
-    async def append_document_xml(
-        self,
-        document_id: str,
-        content: str,
-        operation_key: str,
+        spreadsheet_token: str,
+        sheet_id: str,
+        cell: str,
+        image_path: Path,
+        filename: str,
     ) -> None:
-        del document_id, content
-        self.calls.append(operation_key)
-
-    async def create_image_block(
-        self,
-        document_id: str,
-        parent_block_id: str,
-        operation_key: str,
-    ) -> BlockRef:
-        del document_id, parent_block_id
-        self.calls.append(operation_key)
-        return BlockRef(f"image-{len(self.calls)}")
-
-    async def upload_docx_image(self, block_id: str, filename: str, content: bytes) -> str:
-        del block_id, filename, content
-        self.calls.append("upload")
-        return f"file-{len(self.calls)}"
+        del spreadsheet_token, sheet_id, image_path, filename
+        self.calls.append(f"image:{cell}")
 
 
 @pytest.fixture

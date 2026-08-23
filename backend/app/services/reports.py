@@ -5,24 +5,19 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.domain.results import InspectionResult
 from app.domain.states import ReportStatus, TaskStatus
-from app.domain.usage import (
-    TokenUsageSummary,
-    UsageAvailability,
-    summarize_attempt_payloads,
-)
+from app.domain.usage import TokenUsageSummary, summarize_attempt_payloads
 from app.models import ReportExport
-from app.repositories import TaskRepository
+from app.repositories import REPORT_WORKSHEET_ID_KEY, TaskRepository
 from app.services.events import TaskEventBroker
-from app.services.feishu_client import FeishuApiError, FeishuClientProtocol
+from app.services.feishu_client import FeishuClientProtocol
 from app.services.feishu_oauth import FeishuReauthorizationRequired
 from app.services.lark_cli import FeishuConnectionProviderProtocol
-from app.services.report_matrix import MatrixItem, detail_heading, render_result_matrix
+from app.services.report_sheet import SheetImagePlacement, SheetItem, render_report_sheet
 
 
 @dataclass(frozen=True)
@@ -64,10 +59,14 @@ class ReportBuilder:
         sessions: sessionmaker[Session],
         feishu: FeishuClientProtocol,
         folder_token: str = "",
+        image_upload_concurrency: int = 4,
     ) -> None:
+        if image_upload_concurrency < 1:
+            raise ValueError("image_upload_concurrency must be positive")
         self.sessions = sessions
         self.feishu = feishu
         self.folder_token = folder_token
+        self.image_upload_concurrency = image_upload_concurrency
 
     def project(self, task_id: str) -> ReportProjection:
         with self.sessions() as session:
@@ -138,7 +137,6 @@ class ReportBuilder:
         try:
             await self._write_export(export_id)
         except (
-            FeishuApiError,
             FeishuReauthorizationRequired,
             KeyError,
             OSError,
@@ -173,216 +171,80 @@ class ReportBuilder:
     async def _write_export(self, export_id: str) -> None:
         export = self._get_export(export_id)
         projection = self.project(export.task_id)
-        if export.document_id is None:
+        layout = render_report_sheet(tuple(self._sheet_item(item) for item in projection.items))
+        sheet_id = self._worksheet_id(export)
+        if export.document_id is None or sheet_id is None:
             folder_token = self._folder_token()
             timestamp = datetime.now(UTC).astimezone().strftime("%Y-%m-%d %H:%M")
             title = f"{projection.task_name} 巡检报告 {timestamp}"
-            document = await self.feishu.create_document(title, folder_token, export.id)
-            self._save_document(export.id, document.id, document.url)
+            spreadsheet = await self.feishu.create_spreadsheet(
+                title,
+                folder_token,
+                [list(row) for row in layout.values],
+                layout.styles,
+            )
+            self._save_spreadsheet(
+                export.id,
+                spreadsheet.id,
+                spreadsheet.url,
+                spreadsheet.sheet_id,
+            )
             export = self._get_export(export.id)
+            sheet_id = spreadsheet.sheet_id
         assert export.document_id is not None
-
-        await self._write_blocks(
-            export,
-            "overview",
-            self._overview_blocks(projection),
-        )
-        matrix_items = tuple(
-            MatrixItem(
-                item.filename,
-                item.result.verdict.value if item.result is not None else "failed",
-            )
-            for item in projection.items
-        )
-        await self._write_xml(
-            export,
-            "matrix",
-            render_result_matrix(matrix_items),
-        )
-        for item in projection.items:
-            await self._write_blocks(
-                export,
-                f"detail:{item.image_id}",
-                self._item_blocks(item),
-            )
-            await self._write_image_item(export, item)
-        await self._write_blocks(export, "trace", self._trace_blocks(projection))
+        assert sheet_id is not None
+        await self._write_sheet_images(export, export.document_id, sheet_id, layout.images)
         self._mark_succeeded(export.id)
 
-    async def _write_blocks(
-        self,
-        export: ReportExport,
-        operation_key: str,
-        blocks: list[dict[str, Any]],
-    ) -> None:
-        if self._operation_completed(export.id, operation_key):
-            return
-        assert export.document_id is not None
-        await self.feishu.create_blocks(
-            export.document_id,
-            export.document_id,
-            blocks,
-            operation_key,
-        )
-        self._mark_operation_completed(export.id, operation_key)
-
-    async def _write_xml(
-        self,
-        export: ReportExport,
-        operation_key: str,
-        content: str,
-    ) -> None:
-        if self._operation_completed(export.id, operation_key):
-            return
-        assert export.document_id is not None
-        await self.feishu.append_document_xml(
-            export.document_id,
-            content,
-            operation_key,
-        )
-        self._mark_operation_completed(export.id, operation_key)
-
-    async def _write_image_item(self, export: ReportExport, item: ReportItem) -> None:
-        operation_key = f"image:{item.image_id}"
-        if self._operation_completed(export.id, operation_key):
-            return
-        assert export.document_id is not None
-        block_id = self._remote_block(export.id, operation_key)
-        if block_id is None:
-            block = await self.feishu.create_image_block(
-                export.document_id,
-                export.document_id,
-                operation_key,
-            )
-            block_id = block.id
-            self._save_remote_block(export.id, operation_key, block_id)
-        content = Path(item.thumbnail_path).read_bytes()
-        await self.feishu.upload_docx_image(block_id, item.filename, content)
-        self._mark_operation_completed(export.id, operation_key)
-
     @staticmethod
-    def _text_block(content: str, heading: bool = False) -> dict[str, Any]:
-        key = "heading1" if heading else "text"
-        return {
-            "block_type": 3 if heading else 2,
-            key: {
-                "elements": [
-                    {
-                        "text_run": {
-                            "content": content,
-                            "text_element_style": {},
-                        }
-                    }
-                ],
-                "style": {},
-            },
-        }
-
-    @staticmethod
-    def _format_tokens(value: int) -> str:
-        return f"{value:,}"
-
-    def _token_usage_blocks(
-        self,
-        projection: ReportProjection,
-    ) -> list[dict[str, Any]]:
-        usage = projection.token_usage
-        if usage.availability is UsageAvailability.NOT_STARTED:
-            content = "尚无模型调用。"
-        elif usage.availability is UsageAvailability.UNTRACKED:
-            content = "该任务运行时尚未采集 Token 用量。"
-        elif usage.availability is UsageAvailability.UNAVAILABLE:
-            content = "方舟未返回可用的 Token 用量。"
-        else:
-            total_label = (
-                "已知总 Token"
-                if usage.availability is UsageAvailability.PARTIAL
-                else "总 Token"
-            )
-            lines = [
-                f"{total_label}：{self._format_tokens(usage.total_tokens)}",
-                f"输入：{self._format_tokens(usage.input_tokens)}",
-                f"缓存命中：{self._format_tokens(usage.cached_input_tokens)}",
-                f"未缓存输入：{self._format_tokens(usage.uncached_input_tokens)}",
-                f"输出：{self._format_tokens(usage.output_tokens)}",
-                (
-                    f"推理 Token：{self._format_tokens(usage.reasoning_tokens)}"
-                    "（包含在输出中）"
-                ),
-                f"已知调用：{self._format_tokens(usage.known_call_count)}",
-            ]
-            if usage.unknown_call_count > 0:
-                lines.append(
-                    "未返回或未采集 usage：至少 "
-                    f"{self._format_tokens(usage.unknown_call_count)} "
-                    "次；不计入已知总量。"
-                )
-            content = "\n".join(lines)
-        return [
-            self._text_block("模型 Token 用量", heading=True),
-            self._text_block(content),
-        ]
-
-    def _overview_blocks(self, projection: ReportProjection) -> list[dict[str, Any]]:
-        count_text = "｜".join(
-            [
-                f"合格 {projection.counts['pass']}",
-                f"不合格 {projection.counts['fail']}",
-                f"无法判断 {projection.counts['unverifiable']}",
-                f"执行失败 {projection.counts['failed']}",
-            ]
-        )
-        issue_text = "；".join(
-            f"{rule.rule_name}：{rule.failures}" for rule in projection.rules
-        ) or "无可见违规项"
-        return [
-            self._text_block("AI 生成结果，仅供人工复核；系统只判断图片中清晰可见的内容。"),
-            self._text_block("任务信息", heading=True),
-            self._text_block(
-                f"模板：{projection.template_name} v{projection.template_version}\n"
-                f"模型/Endpoint：{projection.model}\n图片数量：{len(projection.items)}"
-            ),
-            self._text_block("汇总统计", heading=True),
-            self._text_block(count_text),
-            *self._token_usage_blocks(projection),
-            self._text_block("问题汇总", heading=True),
-            self._text_block(issue_text),
-        ]
-
-    def _item_blocks(self, item: ReportItem) -> list[dict[str, Any]]:
-        verdict = item.result.verdict.value if item.result is not None else "failed"
-        blocks = [
-            self._text_block(
-                detail_heading(item.filename, verdict, item.position),
-                heading=True,
-            )
-        ]
-        if item.result is None:
-            blocks.append(self._text_block(f"执行失败：{item.execution_status}"))
-            return blocks
+    def _sheet_item(item: ReportItem) -> SheetItem:
         result = item.result
-        blocks.append(
-            self._text_block(
-                f"结论：{result.verdict.value}\n摘要：{result.summary}"
-            )
-        )
-        for finding in result.findings:
-            blocks.append(
-                self._text_block(
-                    f"{finding.rule_name} [{finding.status.value}]：{finding.observation}\n"
-                    f"视觉证据：{finding.visual_evidence}"
-                )
-            )
-        return blocks
-
-    def _trace_blocks(self, projection: ReportProjection) -> list[dict[str, Any]]:
-        return [
-            self._text_block("追溯信息", heading=True),
-            self._text_block(
-                f"任务 ID：{projection.task_id}\n"
-                f"模板快照哈希：{projection.snapshot_hash}\nSchema 版本：1"
+        return SheetItem(
+            image_id=item.image_id,
+            filename=item.filename,
+            image_path=Path(item.thumbnail_path),
+            verdict=result.verdict.value if result is not None else "failed",
+            summary=result.summary if result is not None else "",
+            unverifiable_reason=(
+                result.unverifiable_reason if result is not None else None
             ),
+            execution_status=item.execution_status,
+        )
+
+    async def _write_sheet_images(
+        self,
+        export: ReportExport,
+        spreadsheet_token: str,
+        sheet_id: str,
+        placements: tuple[SheetImagePlacement, ...],
+    ) -> None:
+        pending = [
+            placement
+            for placement in placements
+            if not self._operation_completed(export.id, placement.operation_key)
         ]
+        semaphore = asyncio.Semaphore(self.image_upload_concurrency)
+        ledger_lock = asyncio.Lock()
+
+        async def upload(placement: SheetImagePlacement) -> None:
+            async with semaphore:
+                await self.feishu.set_cell_image(
+                    spreadsheet_token,
+                    sheet_id,
+                    placement.cell,
+                    placement.path,
+                    placement.filename,
+                )
+            async with ledger_lock:
+                self._mark_operation_completed(export.id, placement.operation_key)
+
+        results = await asyncio.gather(
+            *(upload(placement) for placement in pending),
+            return_exceptions=True,
+        )
+        for result in results:
+            if isinstance(result, Exception):
+                raise result
 
     def _folder_token(self) -> str:
         if not self.folder_token:
@@ -393,10 +255,26 @@ class ReportBuilder:
         with self.sessions() as session:
             return TaskRepository(session).get_export(export_id)
 
-    def _save_document(self, export_id: str, document_id: str, document_url: str) -> None:
+    def _save_spreadsheet(
+        self,
+        export_id: str,
+        spreadsheet_token: str,
+        spreadsheet_url: str,
+        worksheet_id: str,
+    ) -> None:
         with self.sessions() as session:
-            TaskRepository(session).save_export_document(export_id, document_id, document_url)
+            TaskRepository(session).save_export_spreadsheet(
+                export_id,
+                spreadsheet_token,
+                spreadsheet_url,
+                worksheet_id,
+            )
             session.commit()
+
+    @staticmethod
+    def _worksheet_id(export: ReportExport) -> str | None:
+        value = export.remote_blocks_json.get(REPORT_WORKSHEET_ID_KEY)
+        return value if isinstance(value, str) and value else None
 
     def _operation_completed(self, export_id: str, operation_key: str) -> bool:
         with self.sessions() as session:
@@ -405,16 +283,6 @@ class ReportBuilder:
     def _mark_operation_completed(self, export_id: str, operation_key: str) -> None:
         with self.sessions() as session:
             TaskRepository(session).mark_operation_completed(export_id, operation_key)
-            session.commit()
-
-    def _remote_block(self, export_id: str, operation_key: str) -> str | None:
-        with self.sessions() as session:
-            export = TaskRepository(session).get_export(export_id)
-            return export.remote_blocks_json.get(operation_key)
-
-    def _save_remote_block(self, export_id: str, operation_key: str, block_id: str) -> None:
-        with self.sessions() as session:
-            TaskRepository(session).save_remote_block(export_id, operation_key, block_id)
             session.commit()
 
     def _mark_succeeded(self, export_id: str) -> None:

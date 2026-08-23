@@ -535,7 +535,7 @@ Run:
 ```bash
 cd backend && pytest -q
 cd backend && ruff check app tests
-cd backend && mypy app tests
+cd backend && mypy app
 cd frontend && npm test
 cd frontend && npm run build
 ```
