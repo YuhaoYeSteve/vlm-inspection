@@ -193,6 +193,32 @@ class TaskRepository:
             )
         )
 
+    def list_attempts_for_tasks(
+        self,
+        task_ids: list[str],
+    ) -> dict[str, list[InferenceAttempt]]:
+        attempts_by_task: dict[str, list[InferenceAttempt]] = {
+            task_id: [] for task_id in task_ids
+        }
+        if not task_ids:
+            return attempts_by_task
+
+        rows = self.session.execute(
+            select(TaskImage.task_id, InferenceAttempt)
+            .join(InferenceAttempt, InferenceAttempt.image_id == TaskImage.id)
+            .where(TaskImage.task_id.in_(task_ids))
+            .order_by(
+                TaskImage.task_id,
+                TaskImage.position,
+                InferenceAttempt.attempt_number,
+                InferenceAttempt.created_at,
+                InferenceAttempt.id,
+            )
+        )
+        for task_id, attempt in rows:
+            attempts_by_task[task_id].append(attempt)
+        return attempts_by_task
+
     def count_images(self, task_id: str) -> int:
         self.get_task(task_id)
         return int(

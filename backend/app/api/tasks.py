@@ -1,5 +1,6 @@
 import asyncio
 import json
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -16,7 +17,8 @@ from app.dependencies import (
     get_task_dependencies,
 )
 from app.domain.states import InvalidTransition, TaskStatus
-from app.models import InspectionTask
+from app.domain.usage import TokenUsageSummary, parse_attempt_trace, summarize_attempt_payloads
+from app.models import InferenceAttempt, InspectionTask
 from app.repositories import SettingsRepository, TemplateRepository
 from app.schemas import (
     ReportAccepted,
@@ -27,6 +29,7 @@ from app.schemas import (
     TaskDetail,
     TaskImageRead,
     TaskSummary,
+    TokenUsageCallRead,
     UploadAccepted,
     UploadIssue,
     UploadSummary,
@@ -58,7 +61,40 @@ def _task_counts(deps: TaskDependencies, task_id: str) -> TaskCounts:
     return TaskCounts.model_validate(counts)
 
 
-def _task_summary(deps: TaskDependencies, task: InspectionTask) -> TaskSummary:
+def _usage_summary(attempts: Sequence[InferenceAttempt]) -> TokenUsageSummary:
+    return summarize_attempt_payloads([attempt.usage_json for attempt in attempts])
+
+
+def _usage_calls(attempts: Sequence[InferenceAttempt]) -> list[TokenUsageCallRead]:
+    calls: list[TokenUsageCallRead] = []
+    for attempt in attempts:
+        trace = parse_attempt_trace(attempt.usage_json)
+        if trace is None:
+            continue
+        calls.extend(
+            TokenUsageCallRead(
+                attempt_number=attempt.attempt_number,
+                sequence=call.sequence,
+                protocol=trace.protocol,
+                purpose=call.purpose,
+                status=call.status,
+                usage_error=call.usage_error,
+                input_tokens=call.input_tokens,
+                cached_input_tokens=call.cached_input_tokens,
+                output_tokens=call.output_tokens,
+                reasoning_tokens=call.reasoning_tokens,
+                total_tokens=call.total_tokens,
+            )
+            for call in trace.calls
+        )
+    return sorted(calls, key=lambda call: (call.attempt_number, call.sequence))
+
+
+def _task_summary(
+    deps: TaskDependencies,
+    task: InspectionTask,
+    attempts: Sequence[InferenceAttempt],
+) -> TaskSummary:
     template = task.template_snapshot_json
     model = task.model_snapshot_json
     report = deps.repo.get_active_export(task.id)
@@ -73,17 +109,26 @@ def _task_summary(deps: TaskDependencies, task: InspectionTask) -> TaskSummary:
         started_at=task.started_at,
         completed_at=task.completed_at,
         counts=_task_counts(deps, task.id),
+        token_usage=_usage_summary(attempts),
         report_id=None if report is None else report.id,
         report_status=None if report is None else report.status,
         report_url=None if report is None else report.document_url,
     )
 
 
-def _task_detail(deps: TaskDependencies, task: InspectionTask) -> TaskDetail:
-    summary = _task_summary(deps, task)
+def _task_detail(
+    deps: TaskDependencies,
+    task: InspectionTask,
+    attempts: Sequence[InferenceAttempt],
+) -> TaskDetail:
+    summary = _task_summary(deps, task, attempts)
+    attempts_by_image: dict[str, list[InferenceAttempt]] = {}
+    for attempt in attempts:
+        attempts_by_image.setdefault(attempt.image_id, []).append(attempt)
     images = []
     for image in deps.repo.list_images(task.id):
         result = deps.repo.get_current_result(image.id)
+        image_attempts = attempts_by_image.get(image.id, [])
         images.append(
             TaskImageRead(
                 id=image.id,
@@ -97,6 +142,8 @@ def _task_detail(deps: TaskDependencies, task: InspectionTask) -> TaskDetail:
                 original_url=f"/api/tasks/{task.id}/images/{image.id}/content?variant=original",
                 thumbnail_url=f"/api/tasks/{task.id}/images/{image.id}/content?variant=thumbnail",
                 result=None if result is None else result.result_json,
+                token_usage=_usage_summary(image_attempts),
+                token_calls=_usage_calls(image_attempts),
             )
         )
     return TaskDetail(
@@ -138,14 +185,16 @@ def create_task(
         ark_settings,
     )
     deps.session.commit()
-    return _task_detail(deps, task)
+    return _task_detail(deps, task, [])
 
 
 @router.get("", response_model=list[TaskSummary])
 def list_tasks(
     deps: Annotated[TaskDependencies, Depends(get_task_dependencies)],
 ) -> list[TaskSummary]:
-    return [_task_summary(deps, task) for task in deps.repo.list_tasks()]
+    tasks = deps.repo.list_tasks()
+    attempts_by_task = deps.repo.list_attempts_for_tasks([task.id for task in tasks])
+    return [_task_summary(deps, task, attempts_by_task[task.id]) for task in tasks]
 
 
 @router.get("/{task_id}", response_model=TaskDetail)
@@ -157,7 +206,8 @@ def get_task(
         task = deps.repo.get_task(task_id)
     except LookupError as exc:
         raise _not_found(task_id) from exc
-    return _task_detail(deps, task)
+    attempts = deps.repo.list_attempts_for_tasks([task.id])[task.id]
+    return _task_detail(deps, task, attempts)
 
 
 @router.post(

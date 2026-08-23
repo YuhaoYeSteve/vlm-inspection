@@ -1,4 +1,4 @@
-from sqlalchemy import func, select
+from sqlalchemy import event, func, select
 
 from app.core.db import Base, make_engine, make_session_factory
 from app.domain.states import ImageStatus, ReportStatus, TaskStatus
@@ -100,6 +100,81 @@ def test_claim_result_attempt_and_export_are_transactional(tmp_path) -> None:
             )
             == 1
         )
+
+
+def test_lists_attempts_for_tasks_in_image_and_attempt_order(tmp_path) -> None:
+    engine = make_engine(tmp_path / "attempt-list.db")
+    Base.metadata.create_all(engine)
+    sessions = make_session_factory(engine)
+
+    with sessions() as session:
+        repo = TaskRepository(session)
+        task = repo.create_task("ordered", {"template_version": 1}, {"model": "seed"})
+        later_image = repo.add_image(
+            task.id,
+            1,
+            "b.png",
+            "bbb",
+            "b.png",
+            "b.jpg",
+            "bt.jpg",
+        )
+        earlier_image = repo.add_image(
+            task.id,
+            0,
+            "a.png",
+            "aaa",
+            "a.png",
+            "a.jpg",
+            "at.jpg",
+        )
+        later_attempt = repo.record_attempt(
+            later_image.id,
+            status="failed",
+            attempt_number=1,
+        )
+        second_attempt = repo.record_attempt(
+            earlier_image.id,
+            status="succeeded",
+            attempt_number=2,
+        )
+        first_attempt = repo.record_attempt(
+            earlier_image.id,
+            status="failed",
+            attempt_number=1,
+        )
+        empty_task = repo.create_task(
+            "empty",
+            {"template_version": 1},
+            {"model": "seed"},
+        )
+        statements: list[str] = []
+
+        def capture_statement(
+            _connection: object,
+            _cursor: object,
+            statement: str,
+            _parameters: object,
+            _context: object,
+            _executemany: bool,
+        ) -> None:
+            statements.append(statement)
+
+        event.listen(engine, "before_cursor_execute", capture_statement)
+        try:
+            attempts = repo.list_attempts_for_tasks([task.id, empty_task.id])
+        finally:
+            event.remove(engine, "before_cursor_execute", capture_statement)
+
+        assert [attempt.id for attempt in attempts[task.id]] == [
+            first_attempt.id,
+            second_attempt.id,
+            later_attempt.id,
+        ]
+        assert attempts[empty_task.id] == []
+        assert len(statements) == 1
+        assert "task_images" in statements[0]
+        assert "JOIN inference_attempts" in statements[0]
 
 
 def test_reserved_retry_numbers_survive_interleaved_recording(tmp_path) -> None:

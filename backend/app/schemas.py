@@ -3,6 +3,8 @@ from typing import Any, Literal
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, SecretStr
 
+from app.domain.usage import TokenUsageSummary
+
 
 class ArkSettingsWrite(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -107,6 +109,20 @@ class TaskCounts(BaseModel):
     failed: int = 0
 
 
+class TokenUsageCallRead(BaseModel):
+    attempt_number: int
+    sequence: int
+    protocol: Literal["responses", "chat"]
+    purpose: Literal["inspection", "schema_fallback", "json_repair"]
+    status: Literal["succeeded", "failed"]
+    usage_error: Literal["not_returned", "invalid_usage"] | None
+    input_tokens: int | None
+    cached_input_tokens: int | None
+    output_tokens: int | None
+    reasoning_tokens: int | None
+    total_tokens: int | None
+
+
 class TaskImageRead(BaseModel):
     id: str
     position: int
@@ -119,6 +135,8 @@ class TaskImageRead(BaseModel):
     original_url: str
     thumbnail_url: str
     result: dict[str, Any] | None
+    token_usage: TokenUsageSummary
+    token_calls: list[TokenUsageCallRead]
 
 
 class TaskSummary(BaseModel):
@@ -132,6 +150,7 @@ class TaskSummary(BaseModel):
     started_at: datetime | None
     completed_at: datetime | None
     counts: TaskCounts
+    token_usage: TokenUsageSummary
     report_id: str | None = None
     report_status: str | None = None
     report_url: str | None = None

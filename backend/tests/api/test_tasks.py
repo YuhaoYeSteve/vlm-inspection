@@ -1,6 +1,31 @@
+import json
 import time
 
 from app.domain.states import TaskStatus
+
+COMPLETE_USAGE = {
+    "availability": "complete",
+    "input_tokens": 10,
+    "cached_input_tokens": 4,
+    "uncached_input_tokens": 6,
+    "output_tokens": 2,
+    "reasoning_tokens": 0,
+    "total_tokens": 12,
+    "known_call_count": 1,
+    "unknown_call_count": 0,
+}
+
+NOT_STARTED_USAGE = {
+    "availability": "not_started",
+    "input_tokens": 0,
+    "cached_input_tokens": 0,
+    "uncached_input_tokens": 0,
+    "output_tokens": 0,
+    "reasoning_tokens": 0,
+    "total_tokens": 0,
+    "known_call_count": 0,
+    "unknown_call_count": 0,
+}
 
 
 def configure_ark(app_harness) -> None:
@@ -42,6 +67,22 @@ def wait_for_status(app_harness, task_id: str, expected: set[str]) -> dict:
     raise AssertionError(f"task did not reach {expected}")
 
 
+def test_new_task_reports_not_started_token_usage(app_harness) -> None:
+    configure_ark(app_harness)
+
+    response = app_harness.client.post(
+        "/api/tasks",
+        json={"name": "new task", "template_id": app_harness.seeded_template_id},
+    )
+
+    assert response.status_code == 201
+    detail = response.json()
+    assert detail["token_usage"] == NOT_STARTED_USAGE
+    assert detail["images"] == []
+    listed = app_harness.client.get("/api/tasks").json()
+    assert listed[0]["token_usage"] == NOT_STARTED_USAGE
+
+
 def test_create_upload_start_and_fetch_results(app_harness, png_file) -> None:
     task_id = create_task(app_harness)
     uploaded = app_harness.client.post(
@@ -57,6 +98,26 @@ def test_create_upload_start_and_fetch_results(app_harness, png_file) -> None:
     assert detail["counts"]["pass"] == 1
     assert detail["counts"]["failed"] == 0
     assert detail["images"][0]["result"]["verdict"] == "pass"
+    assert detail["token_usage"] == COMPLETE_USAGE
+    assert detail["images"][0]["token_usage"] == COMPLETE_USAGE
+    assert detail["images"][0]["token_calls"][0] == {
+        "attempt_number": 1,
+        "sequence": 1,
+        "protocol": "responses",
+        "purpose": "inspection",
+        "status": "succeeded",
+        "usage_error": None,
+        "input_tokens": 10,
+        "cached_input_tokens": 4,
+        "output_tokens": 2,
+        "reasoning_tokens": 0,
+        "total_tokens": 12,
+    }
+    listed = app_harness.client.get("/api/tasks").json()
+    task_summary = next(item for item in listed if item["id"] == task_id)
+    assert task_summary["token_usage"] == COMPLETE_USAGE
+    assert '"raw_usage"' not in json.dumps(detail)
+    assert '"raw_usage"' not in json.dumps(task_summary)
     content = app_harness.client.get(
         f"/api/tasks/{task_id}/images/{detail['images'][0]['id']}/content",
         params={"variant": "thumbnail"},
@@ -113,6 +174,32 @@ def test_failed_image_can_retry_after_configuration_is_fixed(app_harness, png_fi
     assert retry.status_code == 202
     completed = wait_for_status(app_harness, task_id, {TaskStatus.COMPLETED})
     assert completed["counts"]["pass"] == 1
+    partial_usage = {
+        **COMPLETE_USAGE,
+        "availability": "partial",
+        "unknown_call_count": 1,
+    }
+    assert completed["token_usage"] == partial_usage
+    assert completed["images"][0]["token_usage"] == partial_usage
+    assert [call["attempt_number"] for call in completed["images"][0]["token_calls"]] == [
+        1,
+        2,
+    ]
+    assert completed["images"][0]["token_calls"][0] == {
+        "attempt_number": 1,
+        "sequence": 1,
+        "protocol": "responses",
+        "purpose": "inspection",
+        "status": "failed",
+        "usage_error": "not_returned",
+        "input_tokens": None,
+        "cached_input_tokens": None,
+        "output_tokens": None,
+        "reasoning_tokens": None,
+        "total_tokens": None,
+    }
+    assert completed["images"][0]["token_calls"][1]["total_tokens"] == 12
+    assert '"raw_usage"' not in json.dumps(completed)
 
 
 def test_cancel_prevents_more_uploads(app_harness, png_file) -> None:
