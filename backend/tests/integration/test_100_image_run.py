@@ -191,7 +191,7 @@ async def test_100_images_resume_without_result_misalignment(tmp_path: Path) -> 
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
             detail = client.get(f"/api/tasks/{task_id}").json()
-            if detail["status"] == "exporting":
+            if detail["status"] == "review_required":
                 break
             await asyncio.sleep(0.02)
         else:
@@ -200,7 +200,7 @@ async def test_100_images_resume_without_result_misalignment(tmp_path: Path) -> 
     with sessions() as session:
         task = session.get(InspectionTask, task_id)
         assert task is not None
-        assert task.status == "exporting"
+        assert task.status == "review_required"
         rows = session.execute(
             select(TaskImage, InferenceResultRecord)
             .join(InferenceResultRecord, InferenceResultRecord.image_id == TaskImage.id)

@@ -227,6 +227,15 @@ def test_recover_interrupted_export_requires_explicit_retry(report_fixture) -> N
     assert report_fixture.feishu.calls == []
 
 
+def test_recover_exporting_task_without_export_record(report_fixture) -> None:
+    recovered = report_fixture.builder.recover_interrupted_exports()
+
+    assert recovered == 1
+    with report_fixture.sessions() as session:  # type: ignore[operator]
+        task = TaskRepository(session).get_task(report_fixture.task_id)
+        assert task.status == TaskStatus.REVIEW_REQUIRED
+
+
 class FakeOAuth:
     def __init__(self) -> None:
         self.calls = 0

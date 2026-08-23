@@ -169,7 +169,7 @@ async def test_runner_never_exceeds_configured_concurrency(tmp_path) -> None:
 
         assert inspector.max_active == 3
         assert fixture.count_images("succeeded") == 8
-        assert fixture.task_status() == TaskStatus.EXPORTING
+        assert fixture.task_status() == TaskStatus.REVIEW_REQUIRED
 
 
 @pytest.mark.asyncio
@@ -216,6 +216,51 @@ async def test_malformed_result_becomes_failed_and_requires_review(tmp_path) -> 
 
     assert fixture.count_images(ImageStatus.FAILED) == 1
     assert fixture.task_status() == TaskStatus.REVIEW_REQUIRED
+
+
+@pytest.mark.asyncio
+async def test_successful_task_waits_for_report_when_auto_export_is_unavailable(
+    tmp_path,
+) -> None:
+    fixture = make_task_fixture(tmp_path, image_count=1)
+
+    async def unavailable(_task_id: str) -> None:
+        return None
+
+    runner = TaskRunner(
+        fixture.sessions,
+        FakeInspector(),
+        concurrency=1,
+        report_callback=unavailable,
+    )
+
+    await runner.run_task(fixture.task_id)
+
+    assert fixture.task_status() == TaskStatus.REVIEW_REQUIRED
+
+
+@pytest.mark.asyncio
+async def test_successful_task_enters_exporting_only_after_export_is_prepared(
+    tmp_path,
+) -> None:
+    fixture = make_task_fixture(tmp_path, image_count=1)
+
+    async def prepared(task_id: str) -> str:
+        with fixture.sessions() as session:  # type: ignore[operator]
+            TaskRepository(session).set_task_status(task_id, TaskStatus.EXPORTING)
+            session.commit()
+        return "export-1"
+
+    runner = TaskRunner(
+        fixture.sessions,
+        FakeInspector(),
+        concurrency=1,
+        report_callback=prepared,
+    )
+
+    await runner.run_task(fixture.task_id)
+
+    assert fixture.task_status() == TaskStatus.EXPORTING
 
 
 @pytest.mark.asyncio

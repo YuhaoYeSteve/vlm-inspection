@@ -65,14 +65,27 @@ class TaskRunner:
             for _ in range(concurrency)
         ]
         await asyncio.gather(*workers)
-        target = self._finalize_if_drained(task_id)
-        if target is not None:
+        all_succeeded = self._finalize_if_drained(task_id)
+        if all_succeeded is not None:
             await self.events.publish(
                 task_id,
-                {"type": "task.updated", "task_id": task_id, "status": target.value},
+                {
+                    "type": "task.updated",
+                    "task_id": task_id,
+                    "status": TaskStatus.REVIEW_REQUIRED.value,
+                },
             )
-            if target is TaskStatus.EXPORTING and self.report_callback is not None:
-                await self.report_callback(task_id)
+            if all_succeeded and self.report_callback is not None:
+                export_id = await self.report_callback(task_id)
+                if export_id is not None:
+                    await self.events.publish(
+                        task_id,
+                        {
+                            "type": "task.updated",
+                            "task_id": task_id,
+                            "status": TaskStatus.EXPORTING.value,
+                        },
+                    )
 
     def start(self, task_id: str) -> None:
         active = self._active_tasks.get(task_id)
@@ -330,7 +343,7 @@ class TaskRunner:
                 repo.set_task_status(task_id, TaskStatus.PAUSED)
             session.commit()
 
-    def _finalize_if_drained(self, task_id: str) -> TaskStatus | None:
+    def _finalize_if_drained(self, task_id: str) -> bool | None:
         with self.sessions() as session:
             repo = TaskRepository(session)
             task = repo.get_task(task_id)
@@ -348,14 +361,12 @@ class TaskRunner:
                 for status in statuses
             ):
                 return None
-            target = (
-                TaskStatus.EXPORTING
-                if statuses and all(status == ImageStatus.SUCCEEDED.value for status in statuses)
-                else TaskStatus.REVIEW_REQUIRED
+            all_succeeded = bool(statuses) and all(
+                status == ImageStatus.SUCCEEDED.value for status in statuses
             )
-            repo.set_task_status(task_id, target)
+            repo.set_task_status(task_id, TaskStatus.REVIEW_REQUIRED)
             session.commit()
-            return target
+            return all_succeeded
 
     @staticmethod
     def _duration_ms(started: float) -> int:

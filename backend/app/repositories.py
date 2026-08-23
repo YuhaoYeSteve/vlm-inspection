@@ -370,6 +370,7 @@ class TaskRepository:
         return export
 
     def recover_interrupted_exports(self) -> int:
+        recovered_task_ids: set[str] = set()
         exports = self.session.scalars(
             select(ReportExport).where(ReportExport.status == ReportStatus.RUNNING.value)
         ).all()
@@ -379,7 +380,16 @@ class TaskRepository:
             task = self.get_task(export.task_id)
             if TaskStatus(task.status) is TaskStatus.EXPORTING:
                 task.status = TaskStatus.REVIEW_REQUIRED.value
-        return len(exports)
+            recovered_task_ids.add(task.id)
+        exporting_tasks = self.session.scalars(
+            select(InspectionTask).where(InspectionTask.status == TaskStatus.EXPORTING.value)
+        ).all()
+        for task in exporting_tasks:
+            active = self.get_active_export(task.id)
+            if active is None or active.status != ReportStatus.RUNNING.value:
+                task.status = TaskStatus.REVIEW_REQUIRED.value
+                recovered_task_ids.add(task.id)
+        return len(recovered_task_ids)
 
     def recover_interrupted_work(self) -> int:
         running_tasks = self.session.scalars(
