@@ -142,6 +142,49 @@ class QueueRunner:
 
 
 @pytest.mark.asyncio
+async def test_connection_provider_rechecks_status_after_cli_refreshes_token() -> None:
+    base_user = {
+        "status": "ready",
+        "userName": "测试用户",
+        "expiresAt": "2026-08-23T12:57:16+08:00",
+        "scope": (
+            "docx:document:create docx:document:write_only "
+            "drive:file:upload offline_access"
+        ),
+    }
+    runner = QueueRunner(
+        [
+            {
+                "verified": True,
+                "identity": "user",
+                "identities": {
+                    "bot": {"appName": "示例应用"},
+                    "user": {**base_user, "tokenStatus": "needs_refresh"},
+                },
+            },
+            {
+                "verified": True,
+                "identity": "user",
+                "identities": {
+                    "bot": {"appName": "示例应用"},
+                    "user": {**base_user, "tokenStatus": "valid"},
+                },
+            },
+        ]
+    )
+    provider = LarkCliConnectionProvider(
+        runner,
+        FeishuDestination("folder-1", "目标目录", "https://example/docx/reference"),
+    )
+
+    status = await provider.status()
+
+    assert status.connected is True
+    assert status.token_status == "valid"
+    assert len(runner.calls) == 2
+
+
+@pytest.mark.asyncio
 async def test_report_client_creates_document_with_user_identity() -> None:
     runner = QueueRunner(
         [

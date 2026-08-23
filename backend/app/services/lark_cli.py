@@ -138,11 +138,12 @@ class LarkCliConnectionProvider:
     async def status(self) -> FeishuConnection:
         if not self.destination.configured:
             return self._disconnected("feishu_destination_missing")
+        command = ["auth", "status", "--json", "--verify"]
         try:
-            payload = await self.runner.run(
-                ["auth", "status", "--json", "--verify"],
-                timeout=15,
-            )
+            payload = await self.runner.run(command, timeout=15)
+            user = (payload.get("identities") or {}).get("user") or {}
+            if user.get("tokenStatus") == "needs_refresh":
+                payload = await self.runner.run(command, timeout=15)
         except LarkCliCommandError as exc:
             return self._disconnected(exc.code)
         identities = payload.get("identities") or {}
