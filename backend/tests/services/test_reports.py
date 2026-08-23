@@ -9,9 +9,11 @@ import pytest
 from app.core.db import Base, make_engine, make_session_factory
 from app.domain.results import Finding, FindingStatus, InspectionResult, Verdict
 from app.domain.states import ImageStatus, TaskStatus
+from app.domain.usage import UsageAvailability
 from app.repositories import TaskRepository
 from app.services.feishu_client import BlockRef, DocumentRef, FeishuClient
 from app.services.reports import ReportBuilder
+from tests.usage_fixtures import failed_usage, successful_usage
 
 
 class FakeFeishuClient:
@@ -154,6 +156,13 @@ def report_fixture(tmp_path: Path) -> ReportFixture:
                 str(thumbnail),
                 str(thumbnail),
             )
+            image.attempt_count = 1
+            repo.record_attempt(
+                image.id,
+                status="succeeded",
+                attempt_number=1,
+                usage=successful_usage("responses").model_dump(mode="json"),
+            )
             repo.save_result(
                 image.id,
                 result(verdict, f"result-{position}").model_dump(mode="json"),
@@ -195,6 +204,135 @@ async def test_report_does_not_render_model_confidence(report_fixture) -> None:
 
     rendered = json.dumps(report_fixture.feishu.block_payloads, ensure_ascii=False)
     assert "置信度" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_report_renders_task_token_usage(report_fixture) -> None:
+    await report_fixture.builder.export(report_fixture.task_id)
+
+    rendered = json.dumps(report_fixture.feishu.block_payloads, ensure_ascii=False)
+    assert "模型 Token 用量" in rendered
+    assert "总 Token：36" in rendered
+    assert "输入：30" in rendered
+    assert "缓存命中：12" in rendered
+    assert "未缓存输入：18" in rendered
+    assert "输出：6" in rendered
+    assert "推理 Token：0（包含在输出中）" in rendered
+    assert "已知调用：3" in rendered
+    assert rendered.index("汇总统计") < rendered.index("模型 Token 用量")
+    assert rendered.index("模型 Token 用量") < rendered.index("问题汇总")
+    assert "raw_usage" not in rendered
+    assert "费用" not in rendered
+
+
+def test_report_renders_partial_token_usage_without_counting_unknown_attempt(
+    report_fixture,
+) -> None:
+    with report_fixture.sessions() as session:  # type: ignore[operator]
+        repo = TaskRepository(session)
+        task = repo.create_task(
+            "partial usage task",
+            {"template_name": "general", "template_version": 1, "rules": []},
+            {"model": "seed"},
+        )
+        image = repo.add_image(task.id, 0, "partial.png", "hash-partial", "", "", "")
+        image.attempt_count = 2
+        repo.record_attempt(image.id, "failed", 1, usage=None)
+        repo.record_attempt(
+            image.id,
+            "succeeded",
+            2,
+            usage=successful_usage("responses").model_dump(mode="json"),
+        )
+        session.commit()
+
+    projection = report_fixture.builder.project(task.id)
+    rendered = json.dumps(
+        report_fixture.builder._overview_blocks(projection),
+        ensure_ascii=False,
+    )
+
+    assert projection.token_usage.availability is UsageAvailability.PARTIAL
+    assert projection.token_usage.total_tokens == 12
+    assert "已知总 Token：12" in rendered
+    assert "未返回或未采集 usage：至少 1 次；不计入已知总量。" in rendered
+
+
+def test_report_formats_token_counts_with_thousands_separators() -> None:
+    assert ReportBuilder._format_tokens(1_234_567) == "1,234,567"
+
+
+@pytest.mark.parametrize(
+    ("availability", "usage", "expected"),
+    [
+        pytest.param(
+            UsageAvailability.NOT_STARTED,
+            "no-attempt",
+            "尚无模型调用。",
+            id="not-started",
+        ),
+        pytest.param(
+            UsageAvailability.UNTRACKED,
+            None,
+            "该任务运行时尚未采集 Token 用量。",
+            id="untracked",
+        ),
+        pytest.param(
+            UsageAvailability.UNAVAILABLE,
+            failed_usage("responses").model_dump(mode="json"),
+            "方舟未返回可用的 Token 用量。",
+            id="unavailable",
+        ),
+    ],
+)
+def test_report_renders_distinct_unknown_token_usage_states(
+    report_fixture,
+    availability: UsageAvailability,
+    usage: object,
+    expected: str,
+) -> None:
+    with report_fixture.sessions() as session:  # type: ignore[operator]
+        repo = TaskRepository(session)
+        task = repo.create_task(
+            f"{availability.value} usage task",
+            {"template_name": "general", "template_version": 1, "rules": []},
+            {"model": "seed"},
+        )
+        image = repo.add_image(task.id, 0, "usage.png", "hash-usage", "", "", "")
+        if usage != "no-attempt":
+            image.attempt_count = 1
+            repo.record_attempt(
+                image.id,
+                "failed",
+                1,
+                usage=usage,  # type: ignore[arg-type]
+            )
+        session.commit()
+
+    projection = report_fixture.builder.project(task.id)
+    rendered = json.dumps(
+        report_fixture.builder._token_usage_blocks(projection),
+        ensure_ascii=False,
+    )
+
+    assert projection.token_usage.availability is availability
+    assert expected in rendered
+    assert "总 Token：" not in rendered
+
+
+def test_report_projection_loads_task_attempts_once(report_fixture, monkeypatch) -> None:
+    original = TaskRepository.list_attempts_for_tasks
+    calls: list[list[str]] = []
+
+    def tracked(repo: TaskRepository, task_ids: list[str]):
+        calls.append(task_ids)
+        return original(repo, task_ids)
+
+    monkeypatch.setattr(TaskRepository, "list_attempts_for_tasks", tracked)
+
+    report_fixture.builder.project(report_fixture.task_id)
+
+    assert calls == [[report_fixture.task_id]]
 
 
 @pytest.mark.asyncio

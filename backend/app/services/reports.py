@@ -11,6 +11,11 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.domain.results import InspectionResult
 from app.domain.states import ReportStatus, TaskStatus
+from app.domain.usage import (
+    TokenUsageSummary,
+    UsageAvailability,
+    summarize_attempt_payloads,
+)
 from app.models import ReportExport
 from app.repositories import TaskRepository
 from app.services.events import TaskEventBroker
@@ -47,6 +52,7 @@ class ReportProjection:
     model: str
     created_at: datetime
     counts: dict[str, int]
+    token_usage: TokenUsageSummary
     rules: tuple[RuleSummary, ...]
     items: tuple[ReportItem, ...]
     snapshot_hash: str
@@ -68,6 +74,7 @@ class ReportBuilder:
             repo = TaskRepository(session)
             task = repo.get_task(task_id)
             images = repo.list_images(task_id)
+            attempts = repo.list_attempts_for_tasks([task.id])[task.id]
             items: list[ReportItem] = []
             counts = {"pass": 0, "fail": 0, "unverifiable": 0, "failed": 0}
             rule_counts: Counter[tuple[str, str]] = Counter()
@@ -115,6 +122,9 @@ class ReportBuilder:
                 model=str(model.get("model", "")),
                 created_at=task.created_at,
                 counts=counts,
+                token_usage=summarize_attempt_payloads(
+                    [attempt.usage_json for attempt in attempts]
+                ),
                 rules=rules,
                 items=tuple(items),
                 snapshot_hash=snapshot_hash,
@@ -268,6 +278,51 @@ class ReportBuilder:
             },
         }
 
+    @staticmethod
+    def _format_tokens(value: int) -> str:
+        return f"{value:,}"
+
+    def _token_usage_blocks(
+        self,
+        projection: ReportProjection,
+    ) -> list[dict[str, Any]]:
+        usage = projection.token_usage
+        if usage.availability is UsageAvailability.NOT_STARTED:
+            content = "尚无模型调用。"
+        elif usage.availability is UsageAvailability.UNTRACKED:
+            content = "该任务运行时尚未采集 Token 用量。"
+        elif usage.availability is UsageAvailability.UNAVAILABLE:
+            content = "方舟未返回可用的 Token 用量。"
+        else:
+            total_label = (
+                "已知总 Token"
+                if usage.availability is UsageAvailability.PARTIAL
+                else "总 Token"
+            )
+            lines = [
+                f"{total_label}：{self._format_tokens(usage.total_tokens)}",
+                f"输入：{self._format_tokens(usage.input_tokens)}",
+                f"缓存命中：{self._format_tokens(usage.cached_input_tokens)}",
+                f"未缓存输入：{self._format_tokens(usage.uncached_input_tokens)}",
+                f"输出：{self._format_tokens(usage.output_tokens)}",
+                (
+                    f"推理 Token：{self._format_tokens(usage.reasoning_tokens)}"
+                    "（包含在输出中）"
+                ),
+                f"已知调用：{self._format_tokens(usage.known_call_count)}",
+            ]
+            if usage.unknown_call_count > 0:
+                lines.append(
+                    "未返回或未采集 usage：至少 "
+                    f"{self._format_tokens(usage.unknown_call_count)} "
+                    "次；不计入已知总量。"
+                )
+            content = "\n".join(lines)
+        return [
+            self._text_block("模型 Token 用量", heading=True),
+            self._text_block(content),
+        ]
+
     def _overview_blocks(self, projection: ReportProjection) -> list[dict[str, Any]]:
         count_text = "｜".join(
             [
@@ -289,6 +344,7 @@ class ReportBuilder:
             ),
             self._text_block("汇总统计", heading=True),
             self._text_block(count_text),
+            *self._token_usage_blocks(projection),
             self._text_block("问题汇总", heading=True),
             self._text_block(issue_text),
         ]

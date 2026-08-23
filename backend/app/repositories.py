@@ -15,6 +15,9 @@ from app.models import (
     TaskImage,
 )
 
+REPORT_WORKSHEET_ID_KEY = "__report_worksheet_id__"
+REPORT_LAYOUT_OPERATION = "sheet:layout"
+
 
 class SettingsRepository:
     def __init__(self, session: Session) -> None:
@@ -379,6 +382,28 @@ class TaskRepository:
         export = self.get_export(export_id)
         export.document_id = document_id
         export.document_url = document_url
+        return export
+
+    def save_export_spreadsheet(
+        self,
+        export_id: str,
+        spreadsheet_token: str,
+        spreadsheet_url: str,
+        worksheet_id: str,
+    ) -> ReportExport:
+        export = self.get_export(export_id)
+        export.document_id = spreadsheet_token
+        export.document_url = spreadsheet_url
+        export.remote_blocks_json = {
+            **export.remote_blocks_json,
+            REPORT_WORKSHEET_ID_KEY: worksheet_id,
+        }
+        if REPORT_LAYOUT_OPERATION not in export.completed_operations_json:
+            export.completed_operations_json = [
+                *export.completed_operations_json,
+                REPORT_LAYOUT_OPERATION,
+            ]
+            export.cursor += 1
         return export
 
     def operation_completed(self, export_id: str, operation_key: str) -> bool:
