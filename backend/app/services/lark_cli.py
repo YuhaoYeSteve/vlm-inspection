@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import os
 import shutil
@@ -7,13 +8,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol, cast
 
-from app.services.feishu_client import SpreadsheetRef
+from app.services.feishu_client import BlockRef, DocumentRef
 
 REQUIRED_REPORT_SCOPES = frozenset(
     {
-        "sheets:spreadsheet:create",
-        "sheets:spreadsheet:write_only",
-        "sheets:spreadsheet:read",
+        "docx:document:create",
+        "docx:document:readonly",
+        "docx:document:write_only",
         "drive:file:upload",
     }
 )
@@ -194,93 +195,148 @@ class LarkCliFeishuClient:
     def __init__(self, runner: LarkCliRunnerProtocol) -> None:
         self.runner = runner
 
-    async def create_spreadsheet(
+    async def create_document(
         self,
         title: str,
         folder_token: str,
-        values: list[list[str]],
-        styles: dict[str, Any],
-    ) -> SpreadsheetRef:
-        args = [
-            "sheets",
-            "+workbook-create",
-            "--title",
-            title,
-            "--folder-token",
-            folder_token,
-            "--values",
-            "-",
-            "--styles",
-            json.dumps(styles, ensure_ascii=False, separators=(",", ":")),
-            "--as",
-            "user",
-            "--format",
-            "json",
-        ]
-        payload = await self.runner.run(
-            args,
-            stdin=json.dumps(values, ensure_ascii=False).encode("utf-8"),
-            timeout=90,
+        client_token: str,
+    ) -> DocumentRef:
+        data = await self._api(
+            "POST",
+            "/open-apis/docx/v1/documents",
+            params={"client_token": self._client_token(client_token)},
+            body={"title": title, "folder_token": folder_token},
         )
-        data = self._command_data(payload)
-        spreadsheet = data.get("spreadsheet")
-        spreadsheet_data = spreadsheet if isinstance(spreadsheet, dict) else data
-        token = spreadsheet_data.get("spreadsheet_token") or spreadsheet_data.get("token")
-        if not isinstance(token, str) or not token:
+        document = data.get("document")
+        if not isinstance(document, dict):
             raise LarkCliCommandError("lark_cli_invalid_response")
-        raw_url = spreadsheet_data.get("url") or data.get("url")
-        url = str(raw_url) if raw_url else f"https://feishu.cn/sheets/{token}"
-        sheet_id = self._first_grid_sheet_id(data)
-        if sheet_id is None:
-            info_payload = await self.runner.run(
-                [
-                    "sheets",
-                    "+workbook-info",
-                    "--spreadsheet-token",
-                    token,
-                    "--as",
-                    "user",
-                    "--format",
-                    "json",
-                ],
-                timeout=30,
-            )
-            sheet_id = self._first_grid_sheet_id(self._command_data(info_payload))
-        if sheet_id is None:
+        document_id = document.get("document_id")
+        if not isinstance(document_id, str) or not document_id:
             raise LarkCliCommandError("lark_cli_invalid_response")
-        return SpreadsheetRef(token, url, sheet_id)
+        raw_url = document.get("url")
+        url = str(raw_url) if raw_url else f"https://feishu.cn/docx/{document_id}"
+        return DocumentRef(document_id, url)
 
-    async def set_cell_image(
+    async def append_document_xml(
         self,
-        spreadsheet_token: str,
-        sheet_id: str,
-        cell: str,
-        image_path: Path,
-        filename: str,
+        document_id: str,
+        content: str,
+        operation_key: str,
     ) -> None:
+        del operation_key
         payload = await self.runner.run(
             [
-                "sheets",
-                "+cells-set-image",
-                "--spreadsheet-token",
-                spreadsheet_token,
-                "--sheet-id",
-                sheet_id,
-                "--range",
-                cell,
-                "--image",
-                image_path.name,
-                "--name",
-                filename,
+                "docs",
+                "+update",
+                "--doc",
+                document_id,
+                "--command",
+                "append",
+                "--doc-format",
+                "xml",
+                "--content",
+                "-",
                 "--as",
                 "user",
                 "--format",
                 "json",
             ],
-            cwd=image_path.parent,
+            stdin=content.encode("utf-8"),
+            timeout=60,
+        )
+        data = self._command_data(payload)
+        if data.get("result") != "success":
+            raise LarkCliCommandError("lark_cli_invalid_response")
+
+    async def fetch_document_xml(self, document_id: str) -> str:
+        payload = await self.runner.run(
+            [
+                "docs",
+                "+fetch",
+                "--doc",
+                document_id,
+                "--detail",
+                "with-ids",
+                "--as",
+                "user",
+                "--format",
+                "json",
+            ],
+            timeout=60,
+        )
+        data = self._command_data(payload)
+        document = data.get("document")
+        if not isinstance(document, dict):
+            raise LarkCliCommandError("lark_cli_invalid_response")
+        content = document.get("content")
+        if not isinstance(content, str):
+            raise LarkCliCommandError("lark_cli_invalid_response")
+        return content
+
+    async def create_blocks(
+        self,
+        document_id: str,
+        parent_block_id: str,
+        blocks: list[dict[str, Any]],
+        operation_key: str,
+    ) -> list[BlockRef]:
+        data = await self._api(
+            "POST",
+            f"/open-apis/docx/v1/documents/{document_id}/blocks/"
+            f"{parent_block_id}/children",
+            params={
+                "document_revision_id": "-1",
+                "client_token": self._client_token(operation_key),
+            },
+            body={"children": blocks, "index": -1},
+        )
+        raw_children = data.get("children")
+        if not isinstance(raw_children, list):
+            raise LarkCliCommandError("lark_cli_invalid_response")
+        return [
+            BlockRef(str(block["block_id"]))
+            for block in raw_children
+            if isinstance(block, dict) and block.get("block_id")
+        ]
+
+    async def create_image_block(
+        self,
+        document_id: str,
+        parent_block_id: str,
+        operation_key: str,
+    ) -> BlockRef:
+        blocks = await self.create_blocks(
+            document_id,
+            parent_block_id,
+            [{"block_type": 27, "image": {}}],
+            operation_key,
+        )
+        if not blocks:
+            raise LarkCliCommandError("image_block_missing")
+        return blocks[0]
+
+    async def upload_docx_image(
+        self,
+        block_id: str,
+        filename: str,
+        content: bytes,
+    ) -> str:
+        data = await self._api(
+            "POST",
+            "/open-apis/drive/v1/medias/upload_all",
+            body={
+                "file_name": filename,
+                "parent_type": "docx_image",
+                "parent_node": block_id,
+                "size": str(len(content)),
+            },
+            file_stdin=content,
             timeout=90,
         )
-        self._command_data(payload)
+        token = data.get("file_token")
+        if not isinstance(token, str) or not token:
+            raise LarkCliCommandError("lark_cli_invalid_response")
+        return token
 
     @staticmethod
     def _command_data(payload: dict[str, Any]) -> dict[str, Any]:
@@ -294,17 +350,26 @@ class LarkCliFeishuClient:
             raise LarkCliCommandError("lark_cli_invalid_response")
         return data
 
+    async def _api(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        body: dict[str, Any] | None = None,
+        file_stdin: bytes | None = None,
+        timeout: float = 60,
+    ) -> dict[str, Any]:
+        args = ["api", method, path, "--as", "user", "--format", "json"]
+        if params is not None:
+            args.extend(["--params", json.dumps(params, ensure_ascii=False)])
+        if body is not None:
+            args.extend(["--data", json.dumps(body, ensure_ascii=False)])
+        if file_stdin is not None:
+            args.extend(["--file", "file=-"])
+        payload = await self.runner.run(args, stdin=file_stdin, timeout=timeout)
+        return self._command_data(payload)
+
     @staticmethod
-    def _first_grid_sheet_id(data: dict[str, Any]) -> str | None:
-        raw_sheets = data.get("sheets")
-        if not isinstance(raw_sheets, list):
-            return None
-        for raw_sheet in raw_sheets:
-            if not isinstance(raw_sheet, dict):
-                continue
-            if raw_sheet.get("resource_type", "sheet") != "sheet":
-                continue
-            sheet_id = raw_sheet.get("sheet_id")
-            if isinstance(sheet_id, str) and sheet_id:
-                return sheet_id
-        return None
+    def _client_token(operation_key: str) -> str:
+        return hashlib.sha256(operation_key.encode()).hexdigest()[:32]

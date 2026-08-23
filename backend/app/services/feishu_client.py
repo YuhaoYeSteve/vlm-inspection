@@ -1,29 +1,54 @@
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Protocol
+from typing import Protocol
+
+
+@dataclass(frozen=True)
+class DocumentRef:
+    id: str
+    url: str
+
+
+@dataclass(frozen=True)
+class BlockRef:
+    id: str
 
 
 @dataclass(frozen=True)
 class SpreadsheetRef:
+    """Compatibility value used by existing test doubles during migration."""
+
     id: str
     url: str
     sheet_id: str
 
 
 class FeishuClientProtocol(Protocol):
-    async def create_spreadsheet(
+    async def create_document(
         self,
         title: str,
         folder_token: str,
-        values: list[list[str]],
-        styles: dict[str, Any],
-    ) -> SpreadsheetRef: ...
+        client_token: str,
+    ) -> DocumentRef: ...
 
-    async def set_cell_image(
+    async def append_document_xml(
         self,
-        spreadsheet_token: str,
-        sheet_id: str,
-        cell: str,
-        image_path: Path,
-        filename: str,
+        document_id: str,
+        content: str,
+        operation_key: str,
     ) -> None: ...
+
+    async def fetch_document_xml(self, document_id: str) -> str: ...
+
+    async def create_image_block(
+        self,
+        document_id: str,
+        parent_block_id: str,
+        operation_key: str,
+    ) -> BlockRef: ...
+
+    async def upload_docx_image(
+        self,
+        block_id: str,
+        filename: str,
+        content: bytes,
+    ) -> str: ...
