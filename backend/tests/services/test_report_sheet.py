@@ -1,5 +1,8 @@
 from pathlib import Path
 
+import pytest
+
+from app.domain.usage import TokenUsageSummary, UsageAvailability
 from app.services.report_sheet import SheetItem, render_report_sheet
 
 
@@ -49,8 +52,39 @@ def current_items() -> tuple[SheetItem, ...]:
     )
 
 
+def complete_usage() -> TokenUsageSummary:
+    return TokenUsageSummary(
+        availability=UsageAvailability.COMPLETE,
+        input_tokens=30,
+        cached_input_tokens=12,
+        uncached_input_tokens=18,
+        output_tokens=6,
+        reasoning_tokens=0,
+        total_tokens=36,
+        known_call_count=3,
+        unknown_call_count=0,
+    )
+
+
+def empty_usage(
+    availability: UsageAvailability,
+    unknown_call_count: int = 0,
+) -> TokenUsageSummary:
+    return TokenUsageSummary(
+        availability=availability,
+        input_tokens=0,
+        cached_input_tokens=0,
+        uncached_input_tokens=0,
+        output_tokens=0,
+        reasoning_tokens=0,
+        total_tokens=0,
+        known_call_count=0,
+        unknown_call_count=unknown_call_count,
+    )
+
+
 def test_render_report_sheet_groups_current_task_and_maps_images_to_result_columns() -> None:
-    layout = render_report_sheet(current_items())
+    layout = render_report_sheet(current_items(), token_usage=complete_usage())
 
     assert layout.values[0] == (
         "巡检项",
@@ -72,10 +106,23 @@ def test_render_report_sheet_groups_current_task_and_maps_images_to_result_colum
     assert layout.values[2][6] == "不合格\n问题-6"
     assert layout.values[2][11] == "不合格\n问题-11"
     assert layout.values[2].count("合格") == 10
+    assert layout.values[3] == ("模型 Token 用量", *("" for _ in range(12)))
+    assert layout.values[4][0] == (
+        "总 Token：36\n"
+        "输入：30\n"
+        "缓存命中：12\n"
+        "未缓存输入：18\n"
+        "输出：6\n"
+        "推理 Token：0（包含在输出中）\n"
+        "已知调用：3"
+    )
+    assert layout.values[4][1:] == ("",) * 12
     assert layout.styles["styles"][0]["cell_merges"] == [
         {"range": "B1:C1", "merge_type": "all"},
         {"range": "E1:G1", "merge_type": "all"},
         {"range": "H1:M1", "merge_type": "all"},
+        {"range": "A4:M4", "merge_type": "all"},
+        {"range": "A5:M5", "merge_type": "all"},
     ]
     assert [placement.cell for placement in layout.images] == [
         "B2",
@@ -110,7 +157,8 @@ def test_render_report_sheet_formats_all_result_states_and_fallback_filename() -
             ),
             item(4, "four.png", "unverifiable", "画面模糊"),
             item(5, "five.png", "failed", execution_status="request_failed"),
-        )
+        ),
+        token_usage=complete_usage(),
     )
 
     assert layout.values[0] == (
@@ -130,32 +178,54 @@ def test_render_report_sheet_formats_all_result_states_and_fallback_filename() -
         "执行失败\nrequest_failed",
     )
     assert layout.styles["styles"][0]["cell_merges"] == [
-        {"range": "B1:F1", "merge_type": "all"}
+        {"range": "B1:F1", "merge_type": "all"},
+        {"range": "A4:F4", "merge_type": "all"},
+        {"range": "A5:F5", "merge_type": "all"},
     ]
 
 
 def test_render_report_sheet_uses_reference_proportions_and_visual_styles() -> None:
-    layout = render_report_sheet((item(1, "行02_D列_安保_01.png", "pass"),))
+    layout = render_report_sheet(
+        (item(1, "行02_D列_安保_01.png", "pass"),),
+        token_usage=complete_usage(),
+    )
     sheet_style = layout.styles["styles"][0]
 
     assert sheet_style["row_sizes"] == [
         {"range": "1:1", "type": "pixel", "size": 38},
         {"range": "2:2", "type": "pixel", "size": 124},
         {"range": "3:3", "type": "auto"},
+        {"range": "4:4", "type": "pixel", "size": 38},
+        {"range": "5:5", "type": "auto"},
     ]
     assert sheet_style["col_sizes"] == [
         {"range": "A:A", "type": "pixel", "size": 110},
         {"range": "B:B", "type": "pixel", "size": 105},
     ]
-    assert {
-        style["range"]: style
-        for style in sheet_style["cell_styles"]
-    }["A1:B1"] == {
+    styles_by_range = {
+        style["range"]: style for style in sheet_style["cell_styles"]
+    }
+    assert styles_by_range["A1:B1"] == {
         "range": "A1:B1",
         "background_color": "#DEE0E3",
         "font_weight": "bold",
         "horizontal_alignment": "center",
         "vertical_alignment": "middle",
+        "border": {"style": "solid", "weight": "thin", "color": "#BBBFC4"},
+    }
+    assert styles_by_range["A4:B4"] == {
+        "range": "A4:B4",
+        "background_color": "#DEE0E3",
+        "font_weight": "bold",
+        "horizontal_alignment": "left",
+        "vertical_alignment": "middle",
+        "border": {"style": "solid", "weight": "thin", "color": "#BBBFC4"},
+    }
+    assert styles_by_range["A5:B5"] == {
+        "range": "A5:B5",
+        "horizontal_alignment": "left",
+        "vertical_alignment": "top",
+        "word_wrap": "auto-wrap",
         "border": {"style": "solid", "weight": "thin", "color": "#BBBFC4"},
     }
 
@@ -165,13 +235,15 @@ def test_render_report_sheet_starts_a_new_three_row_band_after_twelve_images() -
         tuple(
             item(index, f"行02_D列_前厅_{index:02}.png", "pass")
             for index in range(1, 14)
-        )
+        ),
+        token_usage=complete_usage(),
     )
 
-    assert len(layout.values) == 6
+    assert len(layout.values) == 8
     assert layout.values[3][:2] == ("巡检项", "前厅")
     assert layout.values[4][:2] == ("巡检图片", "")
     assert layout.values[5][:2] == ("巡检结果", "合格")
+    assert layout.values[6][0] == "模型 Token 用量"
     assert layout.images[-1].cell == "B5"
     assert layout.styles["styles"][0]["row_sizes"] == [
         {"range": "1:1", "type": "pixel", "size": 38},
@@ -180,4 +252,75 @@ def test_render_report_sheet_starts_a_new_three_row_band_after_twelve_images() -
         {"range": "4:4", "type": "pixel", "size": 38},
         {"range": "5:5", "type": "pixel", "size": 124},
         {"range": "6:6", "type": "auto"},
+        {"range": "7:7", "type": "pixel", "size": 38},
+        {"range": "8:8", "type": "auto"},
     ]
+    assert layout.styles["styles"][0]["cell_merges"][-2:] == [
+        {"range": "A7:M7", "merge_type": "all"},
+        {"range": "A8:M8", "merge_type": "all"},
+    ]
+
+
+def test_render_report_sheet_formats_partial_usage_and_unknown_disclaimer() -> None:
+    token_usage = TokenUsageSummary(
+        availability=UsageAvailability.PARTIAL,
+        input_tokens=1_000,
+        cached_input_tokens=400,
+        uncached_input_tokens=600,
+        output_tokens=234,
+        reasoning_tokens=34,
+        total_tokens=1_234,
+        known_call_count=1,
+        unknown_call_count=2,
+    )
+
+    layout = render_report_sheet(
+        (item(1, "行02_D列_安保_01.png", "pass"),),
+        token_usage=token_usage,
+    )
+
+    assert layout.values[-1][0] == (
+        "已知总 Token：1,234\n"
+        "输入：1,000\n"
+        "缓存命中：400\n"
+        "未缓存输入：600\n"
+        "输出：234\n"
+        "推理 Token：34（包含在输出中）\n"
+        "已知调用：1\n"
+        "未返回或未采集 usage：至少 2 次；不计入已知总量。"
+    )
+    assert "raw_usage" not in layout.values[-1][0]
+    assert "费用" not in layout.values[-1][0]
+
+
+@pytest.mark.parametrize(
+    ("token_usage", "expected"),
+    [
+        pytest.param(
+            empty_usage(UsageAvailability.NOT_STARTED),
+            "尚无模型调用。",
+            id="not-started",
+        ),
+        pytest.param(
+            empty_usage(UsageAvailability.UNTRACKED, unknown_call_count=2),
+            "该任务运行时尚未采集 Token 用量。\n未采集 usage：至少 2 次。",
+            id="untracked",
+        ),
+        pytest.param(
+            empty_usage(UsageAvailability.UNAVAILABLE, unknown_call_count=2),
+            "方舟未返回可用的 Token 用量。\n未返回 usage：至少 2 次。",
+            id="unavailable",
+        ),
+    ],
+)
+def test_render_report_sheet_distinguishes_unknown_usage_states(
+    token_usage: TokenUsageSummary,
+    expected: str,
+) -> None:
+    layout = render_report_sheet(
+        (item(1, "行02_D列_安保_01.png", "pass"),),
+        token_usage=token_usage,
+    )
+
+    assert layout.values[-1][0] == expected
+    assert "总 Token：0" not in layout.values[-1][0]

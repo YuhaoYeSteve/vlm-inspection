@@ -171,7 +171,10 @@ class ReportBuilder:
     async def _write_export(self, export_id: str) -> None:
         export = self._get_export(export_id)
         projection = self.project(export.task_id)
-        layout = render_report_sheet(tuple(self._sheet_item(item) for item in projection.items))
+        layout = render_report_sheet(
+            tuple(self._sheet_item(item) for item in projection.items),
+            token_usage=projection.token_usage,
+        )
         sheet_id = self._worksheet_id(export)
         if export.document_id is None or sheet_id is None:
             folder_token = self._folder_token()

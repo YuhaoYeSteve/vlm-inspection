@@ -216,9 +216,48 @@ async def test_report_creates_spreadsheet_and_places_matching_images(report_fixt
         "不合格\nresult-2",
         "无法判断\nimage is obscured",
     ]
+    assert report_fixture.feishu.values[3] == ["模型 Token 用量", "", "", ""]
+    assert report_fixture.feishu.values[4] == [
+        (
+            "总 Token：36\n"
+            "输入：30\n"
+            "缓存命中：12\n"
+            "未缓存输入：18\n"
+            "输出：6\n"
+            "推理 Token：0（包含在输出中）\n"
+            "已知调用：3"
+        ),
+        "",
+        "",
+        "",
+    ]
+    rendered = "\n".join(cell for row in report_fixture.feishu.values for cell in row)
+    assert "raw_usage" not in rendered
+    assert "费用" not in rendered
     assert [call.cell for call in report_fixture.feishu.image_calls] == ["B2", "C2", "D2"]
     assert all(call.spreadsheet_token == "spreadsheet-1" for call in report_fixture.feishu.image_calls)
     assert all(call.sheet_id == "worksheet-1" for call in report_fixture.feishu.image_calls)
+
+
+@pytest.mark.asyncio
+async def test_report_renders_partial_usage_as_known_only(report_fixture) -> None:
+    with report_fixture.sessions() as session:  # type: ignore[operator]
+        repo = TaskRepository(session)
+        image = repo.list_images(report_fixture.task_id)[0]
+        image.attempt_count = 2
+        repo.record_attempt(image.id, "failed", 2, usage=None)
+        session.commit()
+
+    projection = report_fixture.builder.project(report_fixture.task_id)
+    exported = await report_fixture.builder.export(report_fixture.task_id)
+
+    assert exported.status == "succeeded"
+    assert projection.token_usage.availability is UsageAvailability.PARTIAL
+    assert projection.token_usage.total_tokens == 36
+    body = report_fixture.feishu.values[-1][0]
+    assert body.splitlines()[0] == "已知总 Token：36"
+    assert "未返回或未采集 usage：至少 1 次；不计入已知总量。" in body
+    assert "总 Token：0" not in body
 
 
 @pytest.mark.asyncio

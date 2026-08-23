@@ -3,6 +3,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from app.domain.usage import TokenUsageSummary, UsageAvailability
+
 SOURCE_NAME = re.compile(
     r"^行\d+_[A-Z]+列_(?P<department>.+)_(?P<sequence>\d+)\.[^.]+$",
     re.IGNORECASE,
@@ -86,8 +88,56 @@ def _department_groups(items: tuple[SheetItem, ...]) -> list[tuple[str, int, int
     return groups
 
 
+def _format_tokens(value: int) -> str:
+    return f"{value:,}"
+
+
+def _token_usage_text(token_usage: TokenUsageSummary) -> str:
+    if token_usage.availability is UsageAvailability.NOT_STARTED:
+        return "尚无模型调用。"
+    if token_usage.availability is UsageAvailability.UNTRACKED:
+        lines = ["该任务运行时尚未采集 Token 用量。"]
+        if token_usage.unknown_call_count > 0:
+            lines.append(
+                "未采集 usage：至少 "
+                f"{_format_tokens(token_usage.unknown_call_count)} 次。"
+            )
+        return "\n".join(lines)
+    if token_usage.availability is UsageAvailability.UNAVAILABLE:
+        lines = ["方舟未返回可用的 Token 用量。"]
+        if token_usage.unknown_call_count > 0:
+            lines.append(
+                "未返回 usage：至少 "
+                f"{_format_tokens(token_usage.unknown_call_count)} 次。"
+            )
+        return "\n".join(lines)
+
+    total_label = (
+        "已知总 Token"
+        if token_usage.availability is UsageAvailability.PARTIAL
+        else "总 Token"
+    )
+    lines = [
+        f"{total_label}：{_format_tokens(token_usage.total_tokens)}",
+        f"输入：{_format_tokens(token_usage.input_tokens)}",
+        f"缓存命中：{_format_tokens(token_usage.cached_input_tokens)}",
+        f"未缓存输入：{_format_tokens(token_usage.uncached_input_tokens)}",
+        f"输出：{_format_tokens(token_usage.output_tokens)}",
+        f"推理 Token：{_format_tokens(token_usage.reasoning_tokens)}（包含在输出中）",
+        f"已知调用：{_format_tokens(token_usage.known_call_count)}",
+    ]
+    if token_usage.unknown_call_count > 0:
+        lines.append(
+            "未返回或未采集 usage：至少 "
+            f"{_format_tokens(token_usage.unknown_call_count)} "
+            "次；不计入已知总量。"
+        )
+    return "\n".join(lines)
+
+
 def render_report_sheet(
     items: tuple[SheetItem, ...],
+    token_usage: TokenUsageSummary,
     max_images_per_band: int = MAX_IMAGES_PER_BAND,
 ) -> SpreadsheetLayout:
     if not items:
@@ -187,6 +237,50 @@ def render_report_sheet(
                 {"range": f"{result_row}:{result_row}", "type": "auto"},
             ]
         )
+
+    usage_title_row = len(values) + 1
+    usage_body_row = usage_title_row + 1
+    empty_cells = tuple("" for _ in range(total_columns - 1))
+    values.extend(
+        [
+            ("模型 Token 用量", *empty_cells),
+            (_token_usage_text(token_usage), *empty_cells),
+        ]
+    )
+    usage_title_range = f"A{usage_title_row}:{last_column}{usage_title_row}"
+    usage_body_range = f"A{usage_body_row}:{last_column}{usage_body_row}"
+    cell_styles.extend(
+        [
+            {
+                "range": usage_title_range,
+                "background_color": HEADER_FILL,
+                "font_weight": "bold",
+                "horizontal_alignment": "left",
+                "vertical_alignment": "middle",
+                "border": BORDER,
+            },
+            {
+                "range": usage_body_range,
+                "horizontal_alignment": "left",
+                "vertical_alignment": "top",
+                "word_wrap": "auto-wrap",
+                "border": BORDER,
+            },
+        ]
+    )
+    if total_columns > 1:
+        cell_merges.extend(
+            [
+                {"range": usage_title_range, "merge_type": "all"},
+                {"range": usage_body_range, "merge_type": "all"},
+            ]
+        )
+    row_sizes.extend(
+        [
+            {"range": f"{usage_title_row}:{usage_title_row}", "type": "pixel", "size": 38},
+            {"range": f"{usage_body_row}:{usage_body_row}", "type": "auto"},
+        ]
+    )
 
     styles = {
         "styles": [
