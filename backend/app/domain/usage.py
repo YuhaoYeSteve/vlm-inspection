@@ -17,6 +17,26 @@ CallPurpose = Literal["inspection", "schema_fallback", "json_repair"]
 CallStatus = Literal["succeeded", "failed"]
 UsageError = Literal["not_returned", "invalid_usage"]
 
+_RawUsageSchema = Mapping[str, frozenset[str] | None]
+_RESPONSES_RAW_USAGE_SCHEMA: dict[str, frozenset[str] | None] = {
+    "input_tokens": None,
+    "output_tokens": None,
+    "total_tokens": None,
+    "input_tokens_details": frozenset({"cached_tokens"}),
+    "output_tokens_details": frozenset({"reasoning_tokens"}),
+}
+_CHAT_RAW_USAGE_SCHEMA: dict[str, frozenset[str] | None] = {
+    "prompt_tokens": None,
+    "completion_tokens": None,
+    "total_tokens": None,
+    "prompt_tokens_details": frozenset({"cached_tokens"}),
+    "completion_tokens_details": frozenset({"reasoning_tokens"}),
+}
+_ALL_RAW_USAGE_SCHEMA = {
+    **_RESPONSES_RAW_USAGE_SCHEMA,
+    **_CHAT_RAW_USAGE_SCHEMA,
+}
+
 
 class UsageAvailability(StrEnum):
     NOT_STARTED = "not_started"
@@ -67,7 +87,7 @@ class TokenUsageCall(BaseModel):
         if value is None:
             return None
         try:
-            return _mapping(value)
+            return _project_raw_usage(value, _ALL_RAW_USAGE_SCHEMA)
         except Exception as error:
             raise ValueError("raw usage must be a JSON-safe object") from error
 
@@ -144,37 +164,77 @@ class TokenUsageSummary(BaseModel):
     unknown_call_count: int = Field(ge=0)
 
 
-def _json_value(value: Any) -> Any:
-    if value is None or isinstance(value, (str, int, bool)):
-        return value
-    if isinstance(value, float):
-        if not math.isfinite(value):
-            raise TypeError("usage contains a non-finite number")
-        return value
+def _selected_members(value: Any, schema: _RawUsageSchema) -> dict[str, Any]:
+    source: Mapping[Any, Any] | None = None
     if isinstance(value, Mapping):
-        return {str(key): _json_value(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_json_value(item) for item in value]
+        source = value
+    else:
+        attributes = getattr(value, "__dict__", None)
+        if isinstance(attributes, Mapping):
+            source = attributes
 
-    dumper = getattr(value, "model_dump", None)
-    if callable(dumper):
-        return _json_value(dumper(mode="json"))
+    selected: dict[str, Any] = {}
+    if source is not None:
+        for key in schema:
+            try:
+                selected[key] = source[key]
+            except KeyError:
+                pass
 
-    attributes = getattr(value, "__dict__", None)
-    if isinstance(attributes, dict):
-        return {
-            str(key): _json_value(item)
-            for key, item in attributes.items()
-            if not str(key).startswith("_")
+    missing = {key: details for key, details in schema.items() if key not in selected}
+    dumper = None
+    if missing and callable(getattr(type(value), "model_dump", None)):
+        dumper = value.model_dump
+        include = {
+            key: set(details) if details is not None else True
+            for key, details in missing.items()
         }
-    raise TypeError("usage is not JSON serializable")
+        dumped = dumper(mode="python", include=include)
+        if not isinstance(dumped, Mapping):
+            raise TypeError("usage model dump is not an object")
+        for key in missing:
+            try:
+                selected[key] = dumped[key]
+            except KeyError:
+                pass
 
-
-def _mapping(value: Any) -> dict[str, Any]:
-    converted = _json_value(value)
-    if not isinstance(converted, dict):
+    if source is None and not callable(dumper):
         raise TypeError("usage value is not an object")
-    return converted
+    return selected
+
+
+def _safe_raw_number(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return True
+    return isinstance(value, float) and math.isfinite(value)
+
+
+def _project_raw_usage(value: Any, schema: _RawUsageSchema) -> dict[str, Any]:
+    selected = _selected_members(value, schema)
+    projected: dict[str, Any] = {}
+    for key, detail_keys in schema.items():
+        if key not in selected:
+            continue
+        item = selected[key]
+        if detail_keys is None:
+            if _safe_raw_number(item):
+                projected[key] = item
+            continue
+
+        try:
+            details = _selected_members(item, {detail_key: None for detail_key in detail_keys})
+        except TypeError:
+            continue
+        projected[key] = {
+            detail_key: details[detail_key]
+            for detail_key in detail_keys
+            if detail_key in details and _safe_raw_number(details[detail_key])
+        }
+    return projected
 
 
 def _required_int(value: Any) -> int:
@@ -216,15 +276,20 @@ def normalize_provider_call(
         return _unknown_call(sequence, purpose, status, "not_returned", None)
 
     try:
-        raw = _mapping(raw_usage)
+        schema = (
+            _RESPONSES_RAW_USAGE_SCHEMA
+            if protocol == "responses"
+            else _CHAT_RAW_USAGE_SCHEMA
+        )
+        raw = _project_raw_usage(raw_usage, schema)
     except Exception:  # noqa: BLE001
         # Usage telemetry must never interrupt otherwise valid inspection behavior.
         return _unknown_call(sequence, purpose, status, "invalid_usage", None)
 
     try:
         if protocol == "responses":
-            input_details = _mapping(raw["input_tokens_details"])
-            output_details = _mapping(raw["output_tokens_details"])
+            input_details = raw["input_tokens_details"]
+            output_details = raw["output_tokens_details"]
             values = TokenValues(
                 input_tokens=_required_int(raw["input_tokens"]),
                 cached_input_tokens=_required_int(input_details["cached_tokens"]),
@@ -233,8 +298,8 @@ def normalize_provider_call(
                 total_tokens=_required_int(raw["total_tokens"]),
             )
         else:
-            prompt_details = _mapping(raw["prompt_tokens_details"])
-            completion_details = _mapping(raw["completion_tokens_details"])
+            prompt_details = raw["prompt_tokens_details"]
+            completion_details = raw["completion_tokens_details"]
             values = TokenValues(
                 input_tokens=_required_int(raw["prompt_tokens"]),
                 cached_input_tokens=_required_int(prompt_details["cached_tokens"]),

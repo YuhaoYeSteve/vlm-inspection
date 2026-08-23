@@ -6,6 +6,7 @@ from pydantic import ValidationError
 from app.domain.usage import (
     AttemptUsageCollector,
     AttemptUsageTrace,
+    ProtocolName,
     TokenUsageCall,
     TokenValues,
     UsageAvailability,
@@ -63,6 +64,69 @@ def test_normalizes_chat_usage_to_the_same_fields() -> None:
     assert call.output_tokens == 164
     assert call.reasoning_tokens == 114
     assert call.total_tokens == 199
+    assert call.raw_usage == CHAT_USAGE
+
+
+@pytest.mark.parametrize(
+    ("protocol", "raw_usage", "expected"),
+    [
+        pytest.param(
+            "responses",
+            {
+                **RESPONSES_USAGE,
+                "input_tokens_details": {
+                    "cached_tokens": 8,
+                    "prompt": "do not persist",
+                },
+                "output_tokens_details": {
+                    "reasoning_tokens": 1273,
+                    "response": object(),
+                },
+                "api_key": "secret",
+                "prompt": "inspect this image",
+                "response": object(),
+                "extra_values": {"unsupported": {1, 2}},
+            },
+            RESPONSES_USAGE,
+            id="responses",
+        ),
+        pytest.param(
+            "chat",
+            {
+                **CHAT_USAGE,
+                "prompt_tokens_details": {
+                    "cached_tokens": 5,
+                    "prompt": "do not persist",
+                },
+                "completion_tokens_details": {
+                    "reasoning_tokens": 114,
+                    "response": object(),
+                },
+                "api_key": "secret",
+                "prompt": "inspect this image",
+                "response": object(),
+                "extra_values": {"unsupported": {1, 2}},
+            },
+            CHAT_USAGE,
+            id="chat",
+        ),
+    ],
+)
+def test_raw_usage_keeps_only_the_protocol_token_whitelist(
+    protocol: ProtocolName,
+    raw_usage: dict[str, object],
+    expected: dict[str, object],
+) -> None:
+    call = normalize_provider_call(
+        protocol=protocol,
+        sequence=1,
+        purpose="inspection",
+        status="succeeded",
+        raw_usage=raw_usage,
+    )
+
+    assert call.usage_available is True
+    assert call.raw_usage == expected
 
 
 def test_invalid_usage_is_preserved_but_excluded_from_totals() -> None:
@@ -126,14 +190,22 @@ def test_empty_and_legacy_attempts_have_distinct_states() -> None:
     assert legacy.unknown_call_count == 2
 
 
-def test_sdk_objects_are_converted_to_json_safe_raw_usage() -> None:
+def test_sdk_objects_keep_only_whitelisted_numeric_usage_fields() -> None:
     raw_usage = SimpleNamespace(
         input_tokens=58,
-        input_tokens_details=SimpleNamespace(cached_tokens=8),
+        input_tokens_details=SimpleNamespace(
+            cached_tokens=8,
+            prompt="do not persist",
+        ),
         output_tokens=1647,
-        output_tokens_details=SimpleNamespace(reasoning_tokens=1273),
+        output_tokens_details=SimpleNamespace(
+            reasoning_tokens=1273,
+            response=object(),
+        ),
         total_tokens=1705,
-        extra_values=("kept", 1),
+        api_key="secret",
+        prompt="inspect this image",
+        extra_values={"unsupported": {1, 2}},
     )
 
     call = normalize_provider_call(
@@ -145,9 +217,49 @@ def test_sdk_objects_are_converted_to_json_safe_raw_usage() -> None:
     )
 
     assert call.usage_available is True
-    assert call.raw_usage is not None
-    assert call.raw_usage["extra_values"] == ["kept", 1]
-    assert call.raw_usage["input_tokens_details"] == {"cached_tokens": 8}
+    assert call.raw_usage == RESPONSES_USAGE
+
+
+def test_model_dump_usage_is_requested_with_only_whitelisted_fields() -> None:
+    class ModelDumpUsage:
+        __slots__ = ("include",)
+
+        def __init__(self) -> None:
+            self.include: dict[str, object] | None = None
+
+        def model_dump(
+            self,
+            *,
+            mode: str,
+            include: dict[str, object],
+        ) -> dict[str, object]:
+            assert mode == "python"
+            self.include = include
+            return {
+                **RESPONSES_USAGE,
+                "api_key": "secret",
+                "unsupported": {1, 2},
+            }
+
+    raw_usage = ModelDumpUsage()
+
+    call = normalize_provider_call(
+        protocol="responses",
+        sequence=1,
+        purpose="inspection",
+        status="succeeded",
+        raw_usage=raw_usage,
+    )
+
+    assert call.usage_available is True
+    assert call.raw_usage == RESPONSES_USAGE
+    assert raw_usage.include == {
+        "input_tokens": True,
+        "output_tokens": True,
+        "total_tokens": True,
+        "input_tokens_details": {"cached_tokens"},
+        "output_tokens_details": {"reasoning_tokens"},
+    }
 
 
 def test_bool_token_value_is_invalid_usage() -> None:
@@ -162,6 +274,65 @@ def test_bool_token_value_is_invalid_usage() -> None:
     assert call.usage_available is False
     assert call.usage_error == "invalid_usage"
     assert call.raw_usage is not None
+    assert "input_tokens" not in call.raw_usage
+
+
+@pytest.mark.parametrize("value", [None, 58.5])
+def test_null_and_finite_float_are_retained_as_invalid_diagnostics(
+    value: float | None,
+) -> None:
+    call = normalize_provider_call(
+        protocol="responses",
+        sequence=1,
+        purpose="inspection",
+        status="succeeded",
+        raw_usage={**RESPONSES_USAGE, "input_tokens": value},
+    )
+
+    assert call.usage_available is False
+    assert call.usage_error == "invalid_usage"
+    assert call.raw_usage is not None
+    assert call.raw_usage["input_tokens"] == value
+
+
+@pytest.mark.parametrize("value", [float("inf"), float("-inf"), float("nan")])
+def test_non_finite_float_is_not_persisted(value: float) -> None:
+    call = normalize_provider_call(
+        protocol="responses",
+        sequence=1,
+        purpose="inspection",
+        status="succeeded",
+        raw_usage={**RESPONSES_USAGE, "input_tokens": value},
+    )
+
+    assert call.usage_available is False
+    assert call.usage_error == "invalid_usage"
+    assert call.raw_usage is not None
+    assert "input_tokens" not in call.raw_usage
+
+
+def test_invalid_string_token_is_not_persisted_but_numeric_context_is() -> None:
+    call = normalize_provider_call(
+        protocol="responses",
+        sequence=1,
+        purpose="inspection",
+        status="succeeded",
+        raw_usage={
+            **RESPONSES_USAGE,
+            "input_tokens": "secret prompt",
+            "api_key": "secret",
+            "unsupported": {1, 2},
+        },
+    )
+
+    assert call.usage_available is False
+    assert call.usage_error == "invalid_usage"
+    assert call.raw_usage == {
+        "input_tokens_details": {"cached_tokens": 8},
+        "output_tokens": 1647,
+        "output_tokens_details": {"reasoning_tokens": 1273},
+        "total_tokens": 1705,
+    }
 
 
 @pytest.mark.parametrize(
@@ -316,15 +487,77 @@ def test_attempt_trace_rejects_totals_that_do_not_match_calls() -> None:
     assert parse_attempt_trace(payload) is None
 
 
-def test_raw_usage_must_be_json_safe_when_models_are_parsed_directly() -> None:
+def test_raw_usage_is_sanitized_when_models_are_parsed_directly() -> None:
     collector = AttemptUsageCollector("responses")
     collector.add_response("inspection", RESPONSES_USAGE)
     call_payload = collector.snapshot().calls[0].model_dump(mode="json")
-    call_payload["raw_usage"] = {"unsupported": {1, 2}}
+    call_payload["raw_usage"] = {
+        **RESPONSES_USAGE,
+        "api_key": "secret",
+        "prompt": "inspect this image",
+        "unsupported": {1, 2},
+    }
 
-    with pytest.raises(ValidationError):
-        TokenUsageCall.model_validate(call_payload)
+    call = TokenUsageCall.model_validate(call_payload)
+    assert call.raw_usage == RESPONSES_USAGE
 
     trace_payload = collector.snapshot().model_dump(mode="json")
-    trace_payload["calls"][0]["raw_usage"] = {"unsupported": {1, 2}}
-    assert parse_attempt_trace(trace_payload) is None
+    trace_payload["calls"][0]["raw_usage"] = call_payload["raw_usage"]
+    trace = parse_attempt_trace(trace_payload)
+
+    assert trace is not None
+    assert trace.calls[0].raw_usage == RESPONSES_USAGE
+
+
+def test_invalid_direct_raw_usage_drops_strings_and_unsupported_values() -> None:
+    raw_usage = {
+        **RESPONSES_USAGE,
+        "input_tokens": "secret prompt",
+        "api_key": "secret",
+        "unsupported": object(),
+    }
+    call_payload = {
+        "sequence": 1,
+        "purpose": "inspection",
+        "status": "succeeded",
+        "usage_available": False,
+        "usage_error": "invalid_usage",
+        "input_tokens": None,
+        "cached_input_tokens": None,
+        "output_tokens": None,
+        "reasoning_tokens": None,
+        "total_tokens": None,
+        "raw_usage": raw_usage,
+    }
+    expected_raw = {
+        "input_tokens_details": {"cached_tokens": 8},
+        "output_tokens": 1647,
+        "output_tokens_details": {"reasoning_tokens": 1273},
+        "total_tokens": 1705,
+    }
+
+    call = TokenUsageCall.model_validate(call_payload)
+
+    assert call.usage_error == "invalid_usage"
+    assert call.raw_usage == expected_raw
+
+    trace = parse_attempt_trace(
+        {
+            "schema_version": 1,
+            "protocol": "responses",
+            "calls": [call_payload],
+            "totals": {
+                "known_call_count": 0,
+                "unknown_call_count": 1,
+                "input_tokens": 0,
+                "cached_input_tokens": 0,
+                "output_tokens": 0,
+                "reasoning_tokens": 0,
+                "total_tokens": 0,
+            },
+        }
+    )
+
+    assert trace is not None
+    assert trace.calls[0].usage_error == "invalid_usage"
+    assert trace.calls[0].raw_usage == expected_raw
