@@ -89,6 +89,7 @@ def test_claim_result_attempt_and_export_are_transactional(tmp_path) -> None:
         assert export.status == ReportStatus.PENDING
         assert attempt.usage_json is not None
         assert attempt.usage_json["schema_version"] == 1
+        assert attempt.usage_json["totals"]["total_tokens"] == 12
         assert session.scalar(select(func.count()).select_from(InferenceAttempt)) == 1
         assert (
             session.scalar(
