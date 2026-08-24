@@ -97,7 +97,14 @@ class TaskRunner:
                 if not worker.done():
                     worker.cancel()
             await asyncio.gather(*workers, return_exceptions=True)
-            executor.shutdown(wait=True, cancel_futures=True)
+            shutdown_task = asyncio.create_task(
+                asyncio.to_thread(executor.shutdown, wait=True, cancel_futures=True)
+            )
+            try:
+                await asyncio.shield(shutdown_task)
+            except asyncio.CancelledError:
+                await shutdown_task
+                raise
 
     def start(self, task_id: str) -> None:
         active = self._active_tasks.get(task_id)

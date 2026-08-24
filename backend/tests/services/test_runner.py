@@ -260,6 +260,28 @@ async def test_runner_honors_concurrency_above_default_executor_limit(tmp_path) 
 
 
 @pytest.mark.asyncio
+async def test_cancel_does_not_block_event_loop_during_executor_shutdown(tmp_path) -> None:
+    fixture = make_task_fixture(tmp_path, image_count=1)
+    inspector = FakeInspector(delay=0.3)
+    runner = TaskRunner(fixture.sessions, inspector, concurrency=1)
+    run = asyncio.create_task(runner.run_task(fixture.task_id))
+
+    async def wait_for_inspection_start() -> None:
+        while inspector.call_count == 0:
+            await asyncio.sleep(0)
+
+    await asyncio.wait_for(wait_for_inspection_start(), timeout=1)
+    run.cancel()
+    heartbeat_started = time.monotonic()
+    try:
+        await asyncio.sleep(0.01)
+        assert time.monotonic() - heartbeat_started < 0.1
+    finally:
+        with pytest.raises(asyncio.CancelledError):
+            await run
+
+
+@pytest.mark.asyncio
 async def test_runner_uses_task_snapshot_concurrency(tmp_path) -> None:
     fixture = make_task_fixture(tmp_path, image_count=6, configured_concurrency=2)
     inspector = FakeInspector(delay=0.02)
