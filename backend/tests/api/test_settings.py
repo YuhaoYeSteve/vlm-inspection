@@ -74,6 +74,24 @@ def test_keychain_failure_returns_stable_503(tmp_path) -> None:
     assert "must-not-persist" not in database_path.read_bytes().decode("utf-8", errors="ignore")
 
 
+def test_accepts_maximum_concurrency(app_harness) -> None:
+    response = app_harness.client.put(
+        "/api/settings/ark",
+        json={
+            "base_url": "https://ark.example/v3",
+            "protocol": "responses",
+            "model": "seed",
+            "concurrency": 500,
+            "timeout_seconds": 120,
+            "max_retries": 2,
+            "thinking": "disabled",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["concurrency"] == 500
+
+
 def test_rejects_out_of_range_concurrency(app_harness) -> None:
     response = app_harness.client.put(
         "/api/settings/ark",
@@ -81,7 +99,7 @@ def test_rejects_out_of_range_concurrency(app_harness) -> None:
             "base_url": "https://ark.example/v3",
             "protocol": "responses",
             "model": "seed",
-            "concurrency": 6,
+            "concurrency": 501,
             "timeout_seconds": 120,
             "max_retries": 2,
             "thinking": "disabled",

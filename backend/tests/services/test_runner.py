@@ -211,6 +211,39 @@ async def test_runner_never_exceeds_configured_concurrency(tmp_path) -> None:
         assert fixture.task_status() == TaskStatus.REVIEW_REQUIRED
 
 
+def test_runner_accepts_concurrency_through_500(tmp_path) -> None:
+    fixture = make_task_fixture(tmp_path)
+
+    runner = TaskRunner(fixture.sessions, FakeInspector(), concurrency=500)
+
+    assert runner.concurrency == 500
+    with pytest.raises(ValueError, match="concurrency must be between 1 and 500"):
+        TaskRunner(fixture.sessions, FakeInspector(), concurrency=501)
+
+
+@pytest.mark.parametrize(
+    ("configured_concurrency", "expected_max_active"),
+    [(500, 6), (501, 1)],
+)
+@pytest.mark.asyncio
+async def test_runner_bounds_task_snapshot_concurrency(
+    tmp_path,
+    configured_concurrency: int,
+    expected_max_active: int,
+) -> None:
+    fixture = make_task_fixture(
+        tmp_path,
+        image_count=6,
+        configured_concurrency=configured_concurrency,
+    )
+    inspector = FakeInspector(delay=0.02)
+    runner = TaskRunner(fixture.sessions, inspector, concurrency=1)
+
+    await runner.run_task(fixture.task_id)
+
+    assert inspector.max_active == expected_max_active
+
+
 @pytest.mark.asyncio
 async def test_runner_uses_task_snapshot_concurrency(tmp_path) -> None:
     fixture = make_task_fixture(tmp_path, image_count=6, configured_concurrency=2)

@@ -36,6 +36,9 @@ class TaskAlreadyRunning(RuntimeError):
     pass
 
 
+MAX_TASK_CONCURRENCY = 500
+
+
 class TaskRunner:
     def __init__(
         self,
@@ -46,8 +49,8 @@ class TaskRunner:
         sleep: Callable[[float], None] = time.sleep,
         report_callback: Callable[[str], Awaitable[object]] | None = None,
     ) -> None:
-        if not 1 <= concurrency <= 5:
-            raise ValueError("concurrency must be between 1 and 5")
+        if not 1 <= concurrency <= MAX_TASK_CONCURRENCY:
+            raise ValueError("concurrency must be between 1 and 500")
         self.sessions = sessions
         self.inspector = inspector
         self.concurrency = concurrency
@@ -210,7 +213,7 @@ class TaskRunner:
         with self.sessions() as session:
             task = TaskRepository(session).get_task(task_id)
             configured = int(task.model_snapshot_json.get("concurrency", self.concurrency))
-        return configured if 1 <= configured <= 5 else self.concurrency
+        return configured if 1 <= configured <= MAX_TASK_CONCURRENCY else self.concurrency
 
     def _task_is_running(self, task_id: str) -> bool:
         with self.sessions() as session:

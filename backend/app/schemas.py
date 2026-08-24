@@ -13,7 +13,7 @@ class ArkSettingsWrite(BaseModel):
     protocol: Literal["responses", "chat"]
     model: str = Field(min_length=1)
     api_key: SecretStr | None = None
-    concurrency: int = Field(default=3, ge=1, le=5)
+    concurrency: int = Field(default=3, ge=1, le=500)
     timeout_seconds: int = Field(default=120, ge=1, le=600)
     max_retries: int = Field(default=2, ge=0, le=5)
     thinking: Literal["disabled", "auto", "enabled"] = "disabled"
