@@ -245,6 +245,21 @@ async def test_runner_bounds_task_snapshot_concurrency(
 
 
 @pytest.mark.asyncio
+async def test_runner_honors_concurrency_above_default_executor_limit(tmp_path) -> None:
+    fixture = make_task_fixture(
+        tmp_path,
+        image_count=40,
+        configured_concurrency=500,
+    )
+    inspector = FakeInspector(delay=0.2)
+    runner = TaskRunner(fixture.sessions, inspector, concurrency=1)
+
+    await runner.run_task(fixture.task_id)
+
+    assert inspector.max_active == 40
+
+
+@pytest.mark.asyncio
 async def test_runner_uses_task_snapshot_concurrency(tmp_path) -> None:
     fixture = make_task_fixture(tmp_path, image_count=6, configured_concurrency=2)
     inspector = FakeInspector(delay=0.02)

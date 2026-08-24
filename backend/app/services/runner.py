@@ -1,6 +1,7 @@
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Literal, cast
 
@@ -62,33 +63,41 @@ class TaskRunner:
     async def run_task(self, task_id: str) -> None:
         self._mark_running(task_id)
         concurrency = self._task_concurrency(task_id)
+        executor = ThreadPoolExecutor(max_workers=concurrency)
         semaphore = asyncio.Semaphore(concurrency)
         workers = [
-            asyncio.create_task(self._worker(task_id, semaphore))
+            asyncio.create_task(self._worker(task_id, semaphore, executor))
             for _ in range(concurrency)
         ]
-        await asyncio.gather(*workers)
-        all_succeeded = self._finalize_if_drained(task_id)
-        if all_succeeded is not None:
-            await self.events.publish(
-                task_id,
-                {
-                    "type": "task.updated",
-                    "task_id": task_id,
-                    "status": TaskStatus.REVIEW_REQUIRED.value,
-                },
-            )
-            if all_succeeded and self.report_callback is not None:
-                export_id = await self.report_callback(task_id)
-                if export_id is not None:
-                    await self.events.publish(
-                        task_id,
-                        {
-                            "type": "task.updated",
-                            "task_id": task_id,
-                            "status": TaskStatus.EXPORTING.value,
-                        },
-                    )
+        try:
+            await asyncio.gather(*workers)
+            all_succeeded = self._finalize_if_drained(task_id)
+            if all_succeeded is not None:
+                await self.events.publish(
+                    task_id,
+                    {
+                        "type": "task.updated",
+                        "task_id": task_id,
+                        "status": TaskStatus.REVIEW_REQUIRED.value,
+                    },
+                )
+                if all_succeeded and self.report_callback is not None:
+                    export_id = await self.report_callback(task_id)
+                    if export_id is not None:
+                        await self.events.publish(
+                            task_id,
+                            {
+                                "type": "task.updated",
+                                "task_id": task_id,
+                                "status": TaskStatus.EXPORTING.value,
+                            },
+                        )
+        finally:
+            for worker in workers:
+                if not worker.done():
+                    worker.cancel()
+            await asyncio.gather(*workers, return_exceptions=True)
+            executor.shutdown(wait=True, cancel_futures=True)
 
     def start(self, task_id: str) -> None:
         active = self._active_tasks.get(task_id)
@@ -168,7 +177,12 @@ class TaskRunner:
             await asyncio.gather(*running, return_exceptions=True)
         self._active_tasks.clear()
 
-    async def _worker(self, task_id: str, semaphore: asyncio.Semaphore) -> None:
+    async def _worker(
+        self,
+        task_id: str,
+        semaphore: asyncio.Semaphore,
+        executor: ThreadPoolExecutor,
+    ) -> None:
         while self._task_is_running(task_id):
             image = self._claim_next_image(task_id)
             if image is None:
@@ -179,7 +193,12 @@ class TaskRunner:
             )
             try:
                 async with semaphore:
-                    result = await asyncio.to_thread(self._inspect_with_retry, task_id, image)
+                    result = await asyncio.get_running_loop().run_in_executor(
+                        executor,
+                        self._inspect_with_retry,
+                        task_id,
+                        image,
+                    )
                 self._save_success(image.id, result)
                 await self.events.publish(
                     task_id,
