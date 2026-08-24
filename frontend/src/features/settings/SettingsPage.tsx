@@ -73,11 +73,11 @@ export function SettingsPage() {
       await api.saveArkSettings({ ...payload, api_key: arkKey || null });
       return api.testArk();
     },
-    onSuccess: (result) => {
+    onSuccess: async (result) => {
       setArkKey("");
       setArkError(null);
       setArkMessage(`连接测试通过，耗时 ${result.latency_ms} ms`);
-      void queryClient.invalidateQueries({ queryKey: ["settings", "ark"] });
+      await queryClient.invalidateQueries({ queryKey: ["settings", "ark"] });
     },
     onError: (error) => {
       setArkMessage(null);
@@ -148,6 +148,7 @@ export function SettingsPage() {
                 <span>Base URL</span>
                 <input
                   type="url"
+                  disabled={saveArk.isPending}
                   value={arkForm.base_url}
                   onChange={(event) => setArkForm({ ...arkForm, base_url: event.target.value })}
                   required
@@ -156,6 +157,7 @@ export function SettingsPage() {
               <label className="field">
                 <span>协议</span>
                 <select
+                  disabled={saveArk.isPending}
                   value={arkForm.protocol}
                   onChange={(event) =>
                     setArkForm({
@@ -171,6 +173,7 @@ export function SettingsPage() {
               <label className="field">
                 <span>模型 / Endpoint ID</span>
                 <input
+                  disabled={saveArk.isPending}
                   value={arkForm.model}
                   onChange={(event) => setArkForm({ ...arkForm, model: event.target.value })}
                   required
@@ -184,6 +187,7 @@ export function SettingsPage() {
                     aria-label="API Key"
                     type="password"
                     autoComplete="new-password"
+                    disabled={saveArk.isPending}
                     placeholder={ark.data?.api_key_configured ? "留空以保留现有密钥" : "输入 API Key"}
                     value={arkKey}
                     onChange={(event) => setArkKey(event.target.value)}
@@ -201,6 +205,7 @@ export function SettingsPage() {
                   max={500}
                   step={1}
                   required
+                  disabled={saveArk.isPending}
                   value={numericDrafts.concurrency}
                   onChange={(event) =>
                     setNumericDrafts((current) => ({
@@ -218,6 +223,7 @@ export function SettingsPage() {
                   max={600}
                   step={1}
                   required
+                  disabled={saveArk.isPending}
                   value={numericDrafts.timeout_seconds}
                   onChange={(event) =>
                     setNumericDrafts((current) => ({
@@ -235,6 +241,7 @@ export function SettingsPage() {
                   max={5}
                   step={1}
                   required
+                  disabled={saveArk.isPending}
                   value={numericDrafts.max_retries}
                   onChange={(event) =>
                     setNumericDrafts((current) => ({
@@ -247,6 +254,7 @@ export function SettingsPage() {
               <label className="field">
                 <span>思考模式</span>
                 <select
+                  disabled={saveArk.isPending}
                   value={arkForm.thinking}
                   onChange={(event) =>
                     setArkForm({

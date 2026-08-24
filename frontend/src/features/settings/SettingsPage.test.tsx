@@ -139,6 +139,52 @@ test("submits parsed numeric settings before testing the connection", async () =
   await waitFor(() => expect(testArkHandler).toHaveBeenCalledTimes(1));
 });
 
+test("locks Ark controls until the saved settings refetch completes", async () => {
+  const { saveArkHandler, testArkHandler } = useDefaultHandlers();
+  let releaseRefetch!: () => void;
+  const refetchGate = new Promise<void>((resolve) => {
+    releaseRefetch = resolve;
+  });
+  let getArkCallCount = 0;
+  const getArkHandler = vi.fn(async () => {
+    getArkCallCount += 1;
+    if (getArkCallCount > 1) await refetchGate;
+    return HttpResponse.json(arkSettings);
+  });
+  server.use(http.get("*/api/settings/ark", getArkHandler));
+  const user = userEvent.setup();
+  renderSettings();
+  await screen.findByDisplayValue("seed-vision");
+
+  const arkControls = [
+    screen.getByLabelText("Base URL"),
+    screen.getByLabelText("协议"),
+    screen.getByLabelText("模型 / Endpoint ID"),
+    screen.getByLabelText("API Key"),
+    screen.getByLabelText("并发数"),
+    screen.getByLabelText("超时（秒）"),
+    screen.getByLabelText("自动重试"),
+    screen.getByLabelText("思考模式"),
+    screen.getByRole("button", { name: "测试并保存" }),
+  ];
+
+  try {
+    await user.click(screen.getByRole("button", { name: "测试并保存" }));
+    await waitFor(() => expect(saveArkHandler).toHaveBeenCalledTimes(1));
+    for (const control of arkControls) expect(control).toBeDisabled();
+
+    await waitFor(() => expect(testArkHandler).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(getArkHandler).toHaveBeenCalledTimes(2));
+    for (const control of arkControls) expect(control).toBeDisabled();
+  } finally {
+    releaseRefetch();
+  }
+
+  await waitFor(() => {
+    for (const control of arkControls) expect(control).toBeEnabled();
+  });
+});
+
 test.each([
   ["并发数", "501", "并发数必须是 1 到 500 之间的整数"],
   ["并发数", "1.5", "并发数必须是 1 到 500 之间的整数"],
