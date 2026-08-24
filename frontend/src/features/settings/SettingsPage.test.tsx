@@ -34,18 +34,22 @@ const feishuStatus = {
 
 function useDefaultHandlers() {
   const statusHandler = vi.fn(() => HttpResponse.json(feishuStatus));
+  const saveArkHandler = vi.fn((body: Record<string, unknown>) =>
+    HttpResponse.json({ ...arkSettings, ...body, api_key_configured: true }),
+  );
+  const testArkHandler = vi.fn(() =>
+    HttpResponse.json({ ok: true, protocol: "responses", model: "seed-vision", latency_ms: 81 }),
+  );
   server.use(
     http.get("*/api/settings/ark", () => HttpResponse.json(arkSettings)),
     http.put("*/api/settings/ark", async ({ request }) => {
       const body = (await request.json()) as Record<string, unknown>;
-      return HttpResponse.json({ ...arkSettings, ...body, api_key_configured: true });
+      return saveArkHandler(body);
     }),
-    http.post("*/api/settings/ark/test", () =>
-      HttpResponse.json({ ok: true, protocol: "responses", model: "seed-vision", latency_ms: 81 }),
-    ),
+    http.post("*/api/settings/ark/test", testArkHandler),
     http.get("*/api/auth/feishu/status", statusHandler),
   );
-  return { statusHandler };
+  return { saveArkHandler, statusHandler, testArkHandler };
 }
 
 function renderSettings(entry = "/settings") {
@@ -84,17 +88,75 @@ test("replaces the submitted Ark key with configured state", async () => {
   expect(screen.queryByDisplayValue("ark-secret-value")).not.toBeInTheDocument();
 });
 
-test("validates concurrency before sending", async () => {
-  useDefaultHandlers();
+test.each([
+  ["并发数", "500", 500],
+  ["超时（秒）", "60", 60],
+  ["自动重试", "0", 0],
+])("allows %s to be cleared and replaced", async (label, replacement, parsedValue) => {
+  const { saveArkHandler, testArkHandler } = useDefaultHandlers();
   const user = userEvent.setup();
   renderSettings();
-  const concurrency = await screen.findByLabelText("并发数");
+  const input = await screen.findByLabelText(label);
+  const submit = screen.getByRole("button", { name: "测试并保存" });
 
-  await user.clear(concurrency);
-  await user.type(concurrency, "6");
+  await user.clear(input);
+
+  expect(input).toHaveValue(null);
+  expect(submit).toBeDisabled();
+
+  await user.click(submit);
+
+  expect(saveArkHandler).not.toHaveBeenCalled();
+  expect(testArkHandler).not.toHaveBeenCalled();
+
+  await user.type(input, replacement);
+
+  expect(input).toHaveValue(parsedValue);
+  expect(submit).toBeEnabled();
+});
+
+test("submits parsed numeric settings before testing the connection", async () => {
+  const { saveArkHandler, testArkHandler } = useDefaultHandlers();
+  const user = userEvent.setup();
+  renderSettings();
+
+  for (const [label, replacement] of [
+    ["并发数", "500"],
+    ["超时（秒）", "60"],
+    ["自动重试", "0"],
+  ]) {
+    const input = await screen.findByLabelText(label);
+    await user.clear(input);
+    await user.type(input, replacement);
+  }
+
   await user.click(screen.getByRole("button", { name: "测试并保存" }));
 
-  expect(await screen.findByText("并发数必须在 1 到 5 之间")).toBeInTheDocument();
+  await waitFor(() => expect(saveArkHandler).toHaveBeenCalledTimes(1));
+  expect(saveArkHandler).toHaveBeenCalledWith(
+    expect.objectContaining({ concurrency: 500, timeout_seconds: 60, max_retries: 0 }),
+  );
+  await waitFor(() => expect(testArkHandler).toHaveBeenCalledTimes(1));
+});
+
+test.each([
+  ["并发数", "501", "并发数必须是 1 到 500 之间的整数"],
+  ["并发数", "1.5", "并发数必须是 1 到 500 之间的整数"],
+  ["超时（秒）", "601", "超时必须是 1 到 600 之间的整数"],
+  ["自动重试", "6", "自动重试必须是 0 到 5 之间的整数"],
+])("rejects invalid %s value %s before sending", async (label, value, message) => {
+  const { saveArkHandler, testArkHandler } = useDefaultHandlers();
+  const user = userEvent.setup();
+  renderSettings();
+  const input = await screen.findByLabelText(label);
+
+  await user.clear(input);
+  await user.type(input, value);
+  await user.click(screen.getByRole("button", { name: "测试并保存" }));
+
+  expect(await screen.findByText(message)).toBeInTheDocument();
+  expect(saveArkHandler).not.toHaveBeenCalled();
+  expect(testArkHandler).not.toHaveBeenCalled();
 });
 
 test("renders Feishu account and destination without credential inputs", async () => {

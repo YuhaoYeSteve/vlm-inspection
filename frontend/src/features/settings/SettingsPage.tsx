@@ -12,7 +12,15 @@ import { FormEvent, useEffect, useState } from "react";
 import { ApiError, api } from "../../api/client";
 import type { ArkSettings } from "../../api/types";
 
-const defaultArk: Omit<ArkSettings, "api_key_configured"> = {
+type ArkSettingsForm = Omit<ArkSettings, "api_key_configured">;
+
+interface NumericDrafts {
+  concurrency: string;
+  timeout_seconds: string;
+  max_retries: string;
+}
+
+const defaultArk: ArkSettingsForm = {
   base_url: "https://ark.cn-beijing.volces.com/api/v3",
   protocol: "responses",
   model: "",
@@ -21,6 +29,20 @@ const defaultArk: Omit<ArkSettings, "api_key_configured"> = {
   max_retries: 2,
   thinking: "disabled",
 };
+
+function toNumericDrafts(settings: ArkSettingsForm): NumericDrafts {
+  return {
+    concurrency: String(settings.concurrency),
+    timeout_seconds: String(settings.timeout_seconds),
+    max_retries: String(settings.max_retries),
+  };
+}
+
+function parseBoundedInteger(value: string, minimum: number, maximum: number): number | null {
+  if (!value.trim()) return null;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= minimum && parsed <= maximum ? parsed : null;
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof ApiError ? error.message : "请求失败，请检查本地服务。";
@@ -34,6 +56,7 @@ export function SettingsPage() {
     queryFn: api.getFeishuStatus,
   });
   const [arkForm, setArkForm] = useState(defaultArk);
+  const [numericDrafts, setNumericDrafts] = useState(() => toNumericDrafts(defaultArk));
   const [arkKey, setArkKey] = useState("");
   const [arkMessage, setArkMessage] = useState<string | null>(null);
   const [arkError, setArkError] = useState<string | null>(null);
@@ -42,11 +65,12 @@ export function SettingsPage() {
     if (!ark.data) return;
     const { api_key_configured: _configured, ...publicSettings } = ark.data;
     setArkForm(publicSettings);
+    setNumericDrafts(toNumericDrafts(publicSettings));
   }, [ark.data]);
 
   const saveArk = useMutation({
-    mutationFn: async () => {
-      await api.saveArkSettings({ ...arkForm, api_key: arkKey || null });
+    mutationFn: async (payload: ArkSettingsForm) => {
+      await api.saveArkSettings({ ...payload, api_key: arkKey || null });
       return api.testArk();
     },
     onSuccess: (result) => {
@@ -61,15 +85,37 @@ export function SettingsPage() {
     },
   });
 
+  const hasBlankNumericField = Object.values(numericDrafts).some((value) => !value.trim());
+
   function submitArk(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (arkForm.concurrency < 1 || arkForm.concurrency > 5) {
-      setArkError("并发数必须在 1 到 5 之间");
+    if (hasBlankNumericField) return;
+
+    const concurrency = parseBoundedInteger(numericDrafts.concurrency, 1, 500);
+    if (concurrency === null) {
+      setArkError("并发数必须是 1 到 500 之间的整数");
       return;
     }
+    const timeoutSeconds = parseBoundedInteger(numericDrafts.timeout_seconds, 1, 600);
+    if (timeoutSeconds === null) {
+      setArkError("超时必须是 1 到 600 之间的整数");
+      return;
+    }
+    const maxRetries = parseBoundedInteger(numericDrafts.max_retries, 0, 5);
+    if (maxRetries === null) {
+      setArkError("自动重试必须是 0 到 5 之间的整数");
+      return;
+    }
+
+    const payload: ArkSettingsForm = {
+      ...arkForm,
+      concurrency,
+      timeout_seconds: timeoutSeconds,
+      max_retries: maxRetries,
+    };
     setArkError(null);
     setArkMessage(null);
-    saveArk.mutate();
+    saveArk.mutate(payload);
   }
 
   const loading = ark.isLoading || feishuStatus.isLoading;
@@ -152,10 +198,15 @@ export function SettingsPage() {
                 <input
                   type="number"
                   min={1}
-                  max={5}
-                  value={arkForm.concurrency}
+                  max={500}
+                  step={1}
+                  required
+                  value={numericDrafts.concurrency}
                   onChange={(event) =>
-                    setArkForm({ ...arkForm, concurrency: Number(event.target.value) })
+                    setNumericDrafts((current) => ({
+                      ...current,
+                      concurrency: event.target.value,
+                    }))
                   }
                 />
               </label>
@@ -165,9 +216,14 @@ export function SettingsPage() {
                   type="number"
                   min={1}
                   max={600}
-                  value={arkForm.timeout_seconds}
+                  step={1}
+                  required
+                  value={numericDrafts.timeout_seconds}
                   onChange={(event) =>
-                    setArkForm({ ...arkForm, timeout_seconds: Number(event.target.value) })
+                    setNumericDrafts((current) => ({
+                      ...current,
+                      timeout_seconds: event.target.value,
+                    }))
                   }
                 />
               </label>
@@ -177,9 +233,14 @@ export function SettingsPage() {
                   type="number"
                   min={0}
                   max={5}
-                  value={arkForm.max_retries}
+                  step={1}
+                  required
+                  value={numericDrafts.max_retries}
                   onChange={(event) =>
-                    setArkForm({ ...arkForm, max_retries: Number(event.target.value) })
+                    setNumericDrafts((current) => ({
+                      ...current,
+                      max_retries: event.target.value,
+                    }))
                   }
                 />
               </label>
@@ -200,7 +261,11 @@ export function SettingsPage() {
                 </select>
               </label>
               <div className="form-actions field-wide">
-                <button className="button primary-button" disabled={saveArk.isPending} type="submit">
+                <button
+                  className="button primary-button"
+                  disabled={saveArk.isPending || hasBlankNumericField}
+                  type="submit"
+                >
                   {saveArk.isPending ? "正在测试..." : "测试并保存"}
                 </button>
                 <span className={arkError ? "form-message error-text" : "form-message"} aria-live="polite">
