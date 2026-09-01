@@ -304,7 +304,7 @@ export function SettingsPage() {
               </div>
               <div>
                 <dt>授权方式</dt>
-                <dd>Codex 对话授权</dd>
+                <dd>本地 lark-cli 用户授权</dd>
               </div>
               <div>
                 <dt>飞书应用</dt>
@@ -338,7 +338,7 @@ export function SettingsPage() {
             </div>
             {!feishuStatus.data?.connected && (
               <p className="integration-hint">
-                请在 Codex 对话中输入“授权飞书”，完成后刷新状态。
+                请先在本机运行 lark-cli auth login，完成授权后刷新状态。
               </p>
             )}
           </section>

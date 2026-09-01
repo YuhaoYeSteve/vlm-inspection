@@ -1,5 +1,19 @@
 .DS_Store
+
+# Local AI coding assistants and generated planning artifacts (never publish)
 .superpowers/
+docs/superpowers/
+.claude/
+.codex/
+.cursor/
+.continue/
+.windsurf/
+.aider*
+AGENTS.md
+CLAUDE.md
+CODEX.md
+GEMINI.md
+
 .worktrees/
 .env
 .env.*
