@@ -23,3 +23,6 @@ test-results/
 
 # Private inspection samples (keep local; never publish)
 仪容仪表检查图片/
+
+# Local authentication QR codes
+*auth-qr*.png
